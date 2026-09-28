@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kanji Practice — N5 to N1</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-name">漢字 Kanji Practice<span class="ver-pill">N5 → N1</span></div>
+    <div class="brand-sub">Library + scoped quizzes + compound vocab · JLPT N5–N1 mastery</div>
+  </div>
+  <nav class="tabs">
+    <button data-tab="daily" class="active">Daily</button>
+    <button data-tab="library">Library</button>
+    <button data-tab="quiz">Test</button>
+    <button data-tab="compounds">Compounds</button>
+  </nav>
+  <div class="top-right">
+    <span id="hdr-streak" class="streak-pill">🔥 0 days</span>
+    <div class="hdr-search"><span class="mag">⌕</span><input id="hdr-search" placeholder="Search" autocomplete="off" /><kbd>⌘K</kbd></div>
+    <button id="hdr-gear" title="Daily settings">⚙</button>
+    <span id="hdr-level" class="avatar" title="Study level">N4</span>
+  </div>
+</header>
+
+<main>
+  <!-- DAILY -->
+  <section id="tab-daily" class="tab-panel active">
+    <h2 id="daily-title">Today's lesson</h2>
+    <div id="daily-streak" class="stats"></div>
+    <div class="controls">
+      <label>My level:
+        <select id="daily-level">
+          <option value="N5">N5 (beginner)</option>
+          <option value="N4" selected>N4</option>
+          <option value="N3">N3</option>
+          <option value="N2">N2</option>
+          <option value="N1">N1</option>
+        </select>
+      </label>
+      <label>New kanji/day:
+        <input id="daily-goal" type="number" min="3" max="20" value="5" style="width:60px" />
+      </label>
+      <button id="daily-start">Start / continue lesson</button>
+      <button id="daily-reset" class="small">Reset progress</button>
+    </div>
+    <div class="controls">
+      <span>Study scope (new + reviews from):</span>
+      <div class="levels" id="daily-scope">
+        <label><input type="checkbox" value="N5" /> N5</label>
+        <label><input type="checkbox" value="N4" /> N4</label>
+        <label><input type="checkbox" value="N3" /> N3</label>
+        <label><input type="checkbox" value="N2" /> N2</label>
+        <label><input type="checkbox" value="N1" /> N1</label>
+      </div>
+      <button id="daily-only" class="small">Only my level</button>
+      <button id="daily-below" class="small">My level &amp; below</button>
+    </div>
+    <div id="daily-progress" class="stats"></div>
+    <div class="progressbar"><div id="daily-bar"></div></div>
+    <h3>🎯 Guided session</h3>
+    <div id="sess-box" class="sess">
+      <div id="sess-status" class="stats">Press Start to learn today's kanji one by one, then type-quiz yourself.</div>
+      <div id="sess-card"></div>
+      <div class="controls">
+        <button id="sess-learn">1 · Learn</button>
+        <button id="sess-quiz">2 · Quiz (typing)</button>
+        <button id="sess-prev" class="small">← Prev</button>
+        <button id="sess-next" class="small">Next →</button>
+      </div>
+    </div>
+    <details id="browse-details">
+      <summary>📋 Browse all cards (grid — click to expand)</summary>
+      <h3>🆕 New kanji (<span id="daily-new-count">0</span>)</h3>
+      <div id="daily-new" class="grid"></div>
+      <h3>🔁 Reviews due (<span id="daily-rev-count">0</span>)</h3>
+      <div id="daily-rev" class="grid"></div>
+    </details>
+    <div id="daily-done" class="hidden">
+      <h3>✅ Done for today — お疲れ様！</h3>
+      <p id="daily-summary"></p>
+    </div>
+    <h3>📊 Overall</h3>
+    <div id="daily-stats" class="stats"></div>
+    <div id="daily-levels"></div>
+  </section>
+
+  <!-- LIBRARY -->
+  <section id="tab-library" class="tab-panel">
+    <div class="controls">
+      <div class="levels" id="lib-levels">
+        <label><input type="checkbox" value="N5" checked /> N5</label>
+        <label><input type="checkbox" value="N4" checked /> N4</label>
+        <label><input type="checkbox" value="N3" checked /> N3</label>
+        <label><input type="checkbox" value="N2" /> N2</label>
+        <label><input type="checkbox" value="N1" /> N1</label>
+      </div>
+      <input id="lib-search" type="search" placeholder="Search kanji, meaning, reading… e.g. 食, food, ショク" />
+      <select id="lib-sort">
+        <option value="freq">Sort: frequency</option>
+        <option value="strokes">Sort: strokes</option>
+        <option value="level">Sort: level</option>
+      </select>
+    </div>
+    <div id="lib-stats" class="stats"></div>
+    <div id="lib-grid" class="grid"></div>
+    <button id="lib-more">Show more</button>
+    <div id="kanji-detail" class="modal hidden">
+      <div class="modal-card">
+        <button id="detail-close">✕</button>
+        <div id="detail-body"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUIZ -->
+  <section id="tab-quiz" class="tab-panel">
+    <div class="quiz-setup">
+      <div class="setup-head"><h2>Test setup</h2><span id="quiz-active" class="pill-live hidden">● Active Session</span></div>
+      <div class="row">
+        <span>Scope:</span>
+        <div class="levels" id="quiz-levels">
+          <label><input type="checkbox" value="N5" checked /> N5</label>
+          <label><input type="checkbox" value="N4" checked /> N4</label>
+          <label><input type="checkbox" value="N3" checked /> N3</label>
+          <label><input type="checkbox" value="N2" /> N2</label>
+          <label><input type="checkbox" value="N1" /> N1</label>
+        </div>
+        <button id="preset-n5n4" class="small">N5–N4 only</button>
+        <button id="preset-n3n1" class="small">N3–N1</button>
+        <button id="preset-all" class="small">All</button>
+      </div>
+      <div class="row">
+        <label>Mode:
+          <select id="quiz-mode">
+            <option value="kanji-reading">Kanji → Reading (pick the kana)</option>
+            <option value="reading-kanji">Reading → Kanji (pick the kanji)</option>
+          </select>
+        </label>
+        <label>Readings:
+          <select id="quiz-family">
+            <option value="auto">Auto (both)</option>
+            <option value="on">カタカナ Onyomi</option>
+            <option value="kun">ひらがな Kunyomi</option>
+          </select>
+        </label>
+        <label>Questions:
+          <select id="quiz-count">
+            <option>5</option>
+            <option selected>10</option>
+            <option>20</option>
+            <option>30</option>
+          </select>
+        </label>
+        <button id="quiz-start">Start quiz</button>
+      </div>
+      <div id="quiz-best" class="stats"></div>
+    </div>
+    <div id="quiz-play" class="hidden">
+      <div id="quiz-progress"></div>
+      <div id="quiz-q" class="quiz-card"></div>
+      <div id="quiz-opts" class="quiz-opts"></div>
+      <div id="quiz-feedback"></div>
+      <button id="quiz-next" class="hidden">Next →</button>
+      <div class="quiz-hint"><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> Select Answer</span> · <span><kbd>Enter</kbd> Next</span></div>
+    </div>
+    <div id="quiz-result" class="hidden"></div>
+  </section>
+
+  <!-- COMPOUNDS -->
+  <section id="tab-compounds" class="tab-panel">
+    <h2>Vocabulary compounds — e.g. 飲 + 食 = 飲食, 洗濯機 = せんたっき</h2>
+    <p>Main list is the full vocab dataset (2+ kanji, including 3-character words like 洗濯機 and kana-mix like 食べ物). <b>Click a word</b> to see example phrases/sentences. Click a kanji to jump to its library entry.</p>
+    <div class="controls">
+      <div class="levels" id="comp-levels">
+        <label><input type="checkbox" value="N5" checked /> N5</label>
+        <label><input type="checkbox" value="N4" checked /> N4</label>
+        <label><input type="checkbox" value="N3" checked /> N3</label>
+        <label><input type="checkbox" value="N2" /> N2</label>
+        <label><input type="checkbox" value="N1" /> N1</label>
+      </div>
+      <input id="comp-search" type="search" placeholder="Search vocab… e.g. 洗濯機, せんたっき, washing machine" />
+      <select id="comp-length">
+        <option value="all">All lengths (2+ kanji)</option>
+        <option value="2">2-kanji only</option>
+        <option value="3plus">3+ kanji (e.g. 洗濯機)</option>
+        <option value="kana">Kana-mix (e.g. 食べ物)</option>
+      </select>
+    </div>
+    <h3>📖 Vocabulary</h3>
+    <div class="controls">
+      <button id="comp-shuffle">🔀 Shuffle</button>
+      <label><input type="checkbox" id="comp-furi" checked /> ふりがな</label>
+      <span class="stats">Random order every time you open this tab.</span>
+    </div>
+    <div id="comp-stats" class="stats"></div>
+    <div id="comp-list" class="comp-list"></div>
+    <button id="comp-more">Show more</button>
+    <details id="starter-details">
+      <summary>⭐ Starter combos (curated examples — click to expand)</summary>
+      <div id="curated-list" class="comp-list"></div>
+    </details>
+    <h3>➕ Add your own</h3>
+    <form id="custom-form" class="custom-form">
+      <input id="c-word" placeholder="Word 飲食" required />
+      <input id="c-reading" placeholder="Reading いんしょく" required />
+      <input id="c-meaning" placeholder="Meaning food and drink" required />
+      <input id="c-parts" placeholder="Parts 飲(drink) + 食(eat)" />
+      <button type="submit">Save (stored locally)</button>
+    </form>
+    <div id="custom-list" class="comp-list"></div>
+  </section>
+</main>
+
+<footer>
+  <span><b>Kanji Practice © 2024</b> · Data: OpenJLPT (CC BY-SA 4.0)</span>
+  <span class="shortcuts">Shortcuts: <kbd>1–4</kbd> Answer <kbd>Enter</kbd> Next <kbd>⌘K</kbd>/<kbd>/</kbd> Search</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
