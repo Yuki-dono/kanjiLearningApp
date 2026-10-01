@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Kanji Practice — N5 to N1</title>
 <link rel="stylesheet" href="styles.css" />
+<script>try{if(localStorage.getItem("kanji-theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}</script>
 </head>
 <body>
 <header class="topbar">
@@ -21,7 +22,7 @@
   <div class="top-right">
     <span id="hdr-streak" class="streak-pill">🔥 0 days</span>
     <div class="hdr-search"><span class="mag">⌕</span><input id="hdr-search" placeholder="Search" autocomplete="off" /><kbd>⌘K</kbd></div>
-    <button id="hdr-gear" title="Daily settings">⚙</button>
+    <button id="theme-btn" title="Toggle dark mode">🌙</button>
     <span id="hdr-level" class="avatar" title="Study level">N4</span>
   </div>
 </header>
@@ -46,6 +47,34 @@
       </label>
       <button id="daily-start">Start / continue lesson</button>
       <button id="daily-reset" class="small">Reset progress</button>
+      <button id="daily-export" class="small" title="Download progress backup (also moves progress to another device/browser)">Export progress</button>
+      <button id="daily-import-btn" class="small">Import</button>
+      <input type="file" id="daily-import" accept="application/json" class="hidden" />
+    </div>
+    <div class="controls">
+      <span>☁️ Sync:</span>
+      <span id="sync-status" class="stats">Not connected</span>
+      <button id="sync-now" class="small">Sync now</button>
+      <button id="acct-btn" class="small">Account</button>
+    </div>
+    <div id="acct-modal" class="modal hidden">
+      <div class="modal-card">
+        <button id="acct-close">✕</button>
+        <h3>☁️ Cloud sync (Supabase)</h3>
+        <p class="stats">Syncs SRS memory, days, streak, scores and custom words between PC and phone.</p>
+        <label>Project URL<br /><input id="supa-url" type="text" placeholder="https://xyz.supabase.co" style="width:100%" /></label>
+        <label>Anon public key<br /><input id="supa-key" type="password" placeholder="eyJ…" style="width:100%" /></label>
+        <div class="controls"><button id="supa-save" class="small">Save connection</button></div>
+        <hr />
+        <label>Email<br /><input id="acct-email" type="email" placeholder="you@mail.com" style="width:100%" autocomplete="email" /></label>
+        <label>Password<br /><input id="acct-pass" type="password" placeholder="••••••••" style="width:100%" autocomplete="current-password" /></label>
+        <div class="controls">
+          <button id="acct-login">Log in</button>
+          <button id="acct-signup" class="small">Sign up</button>
+          <button id="acct-logout" class="small hidden">Log out</button>
+        </div>
+        <div id="acct-msg" class="stats"></div>
+      </div>
     </div>
     <div class="controls">
       <span>Study scope (new + reviews from):</span>
@@ -107,13 +136,7 @@
     </div>
     <div id="lib-stats" class="stats"></div>
     <div id="lib-grid" class="grid"></div>
-    <button id="lib-more">Show more</button>
-    <div id="kanji-detail" class="modal hidden">
-      <div class="modal-card">
-        <button id="detail-close">✕</button>
-        <div id="detail-body"></div>
-      </div>
-    </div>
+    <div id="lib-pager"></div>
   </section>
 
   <!-- QUIZ -->
@@ -132,12 +155,14 @@
         <button id="preset-n5n4" class="small">N5–N4 only</button>
         <button id="preset-n3n1" class="small">N3–N1</button>
         <button id="preset-all" class="small">All</button>
+        <label title="Only quiz kanji/words you have graded in Daily"><input type="checkbox" id="quiz-learned" /> Learned only</label>
       </div>
       <div class="row">
         <label>Mode:
           <select id="quiz-mode">
             <option value="kanji-reading">Kanji → Reading (pick the kana)</option>
             <option value="reading-kanji">Reading → Kanji (pick the kanji)</option>
+            <option value="compound-reading">Word → Reading (pick the kana)</option>
           </select>
         </label>
         <label>Readings:
@@ -165,7 +190,6 @@
       <div id="quiz-opts" class="quiz-opts"></div>
       <div id="quiz-feedback"></div>
       <button id="quiz-next" class="hidden">Next →</button>
-      <div class="quiz-hint"><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> Select Answer</span> · <span><kbd>Enter</kbd> Next</span></div>
     </div>
     <div id="quiz-result" class="hidden"></div>
   </section>
@@ -214,6 +238,13 @@
     <div id="custom-list" class="comp-list"></div>
   </section>
 </main>
+
+<div id="kanji-detail" class="modal hidden">
+  <div class="modal-card">
+    <button id="detail-close">✕</button>
+    <div id="detail-body"></div>
+  </div>
+</div>
 
 <footer>
   <span><b>Kanji Practice © 2024</b> · Data: OpenJLPT (CC BY-SA 4.0)</span>
