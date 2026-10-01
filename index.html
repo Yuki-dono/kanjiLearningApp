@@ -3,253 +3,495 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Kanji Practice — N5 to N1</title>
+<title>KanjiLearn — JLPT N5 → N1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 <script>try{if(localStorage.getItem("kanji-theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}</script>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <div class="brand-name">漢字 Kanji Practice<span class="ver-pill">N5 → N1</span></div>
-    <div class="brand-sub">Library + scoped quizzes + compound vocab · JLPT N5–N1 mastery</div>
-  </div>
-  <nav class="tabs">
-    <button data-tab="daily" class="active">Daily</button>
-    <button data-tab="library">Library</button>
-    <button data-tab="quiz">Test</button>
-    <button data-tab="compounds">Compounds</button>
-  </nav>
-  <div class="top-right">
-    <span id="hdr-streak" class="streak-pill">🔥 0 days</span>
-    <div class="hdr-search"><span class="mag">⌕</span><input id="hdr-search" placeholder="Search" autocomplete="off" /><kbd>⌘K</kbd></div>
-    <button id="theme-btn" title="Toggle dark mode">🌙</button>
-    <span id="hdr-level" class="avatar" title="Study level">N4</span>
-  </div>
-</header>
+<div class="app" id="app">
+  <div class="nav-scrim" id="nav-scrim"></div>
 
-<main>
-  <!-- DAILY -->
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">漢</span>
+      <span class="brand-txt"><b>KanjiLearn</b><small>JLPT N5 → N1</small></span>
+    </div>
+
+    <nav class="side-nav">
+      <p class="eyebrow">Study Menu</p>
+      <div class="tabs">
+        <button data-tab="daily" class="active"><i data-ico="sun"></i><span>Daily</span></button>
+        <button data-tab="library"><i data-ico="book"></i><span>Library</span></button>
+        <button data-tab="quiz"><i data-ico="check"></i><span>Test</span></button>
+        <button data-tab="compounds"><i data-ico="layers"></i><span>Compounds</span></button>
+      </div>
+
+      <p class="eyebrow">Preferences</p>
+      <button class="side-link" id="side-shortcuts"><i data-ico="kbd"></i><span>Shortcuts</span></button>
+      <button class="side-link" id="side-theme"><i data-ico="moon"></i><span id="side-theme-label">Dark mode</span></button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="mnemonic">
+        <b>Mnemonic Memory Aid</b>
+        <p>Connect the round sun with a sunspot or horizon mark across the character.</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ WORKSPACE ============ -->
+  <div class="workspace">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu"><i data-ico="menu"></i></button>
+      <div class="search">
+        <i data-ico="search"></i>
+        <input id="hdr-search" placeholder="Search kanji, radicals, meanings…" autocomplete="off" />
+        <kbd>⌘K</kbd>
+      </div>
+      <div class="top-right">
+        <span id="hdr-streak" class="chip chip-streak">🔥 0 days</span>
+        <span id="hdr-xp" class="chip chip-xp">◈ 0 XP</span>
+        <button class="icon-btn" id="theme-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+        <button class="avatar" id="hdr-level" title="Study level">N4</button>
+      </div>
+    </header>
+
+    <main class="page">
+
+  <!-- ================= DAILY ================= -->
   <section id="tab-daily" class="tab-panel active">
-    <h2 id="daily-title">Today's lesson</h2>
-    <div id="daily-streak" class="stats"></div>
-    <div class="controls">
-      <label>My level:
-        <select id="daily-level">
-          <option value="N5">N5 (beginner)</option>
-          <option value="N4" selected>N4</option>
-          <option value="N3">N3</option>
-          <option value="N2">N2</option>
-          <option value="N1">N1</option>
-        </select>
-      </label>
-      <label>New kanji/day:
-        <input id="daily-goal" type="number" min="3" max="20" value="5" style="width:60px" />
-      </label>
-      <button id="daily-start">Start / continue lesson</button>
-      <button id="daily-reset" class="small">Reset progress</button>
-      <button id="daily-export" class="small" title="Download progress backup (also moves progress to another device/browser)">Export progress</button>
-      <button id="daily-import-btn" class="small">Import</button>
-      <input type="file" id="daily-import" accept="application/json" class="hidden" />
+    <div class="page-head">
+      <div>
+        <h1 id="daily-title">Welcome back 👋</h1>
+        <p id="daily-streak" class="sub">Loading your progress…</p>
+      </div>
+      <div class="head-tools">
+        <button class="btn btn-ghost" id="daily-reset" title="Clear all SRS memory on this device">Reset</button>
+        <button class="btn btn-primary" id="daily-start">▶ Resume Session</button>
+      </div>
     </div>
-    <div class="controls">
-      <span>☁️ Sync:</span>
-      <span id="sync-status" class="stats">Not connected</span>
-      <button id="sync-now" class="small">Sync now</button>
-      <button id="acct-btn" class="small">Account</button>
-    </div>
-    <div id="acct-modal" class="modal hidden">
-      <div class="modal-card">
-        <button id="acct-close">✕</button>
-        <h3>☁️ Cloud sync (Supabase)</h3>
-        <p class="stats">Syncs SRS memory, days, streak, scores and custom words between PC and phone.</p>
-        <label>Project URL<br /><input id="supa-url" type="text" placeholder="https://xyz.supabase.co" style="width:100%" /></label>
-        <label>Anon public key<br /><input id="supa-key" type="password" placeholder="eyJ…" style="width:100%" /></label>
-        <div class="controls"><button id="supa-save" class="small">Save connection</button></div>
-        <hr />
-        <label>Email<br /><input id="acct-email" type="email" placeholder="you@mail.com" style="width:100%" autocomplete="email" /></label>
-        <label>Password<br /><input id="acct-pass" type="password" placeholder="••••••••" style="width:100%" autocomplete="current-password" /></label>
-        <div class="controls">
-          <button id="acct-login">Log in</button>
-          <button id="acct-signup" class="small">Sign up</button>
-          <button id="acct-logout" class="small hidden">Log out</button>
+
+    <div class="split">
+      <div class="col-main">
+
+        <div class="card soft">
+          <div class="card-head">
+            <h3>Study Settings</h3>
+            <span class="chip chip-quiet">Daily scope</span>
+          </div>
+          <div class="settings-grid">
+            <label class="field">
+              <span class="eyebrow">My Level</span>
+              <select id="daily-level">
+                <option value="N5">N5 (beginner)</option>
+                <option value="N4" selected>N4</option>
+                <option value="N3">N3</option>
+                <option value="N2">N2</option>
+                <option value="N1">N1</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="eyebrow">New Kanji / Day</span>
+              <input id="daily-goal" type="number" min="3" max="20" value="5" />
+            </label>
+            <div class="field field-wide">
+              <span class="eyebrow">Study Scope (new + reviews from)</span>
+              <div class="levels seg" id="daily-scope">
+                <label><input type="checkbox" value="N5" /> <span>N5</span></label>
+                <label><input type="checkbox" value="N4" /> <span>N4</span></label>
+                <label><input type="checkbox" value="N3" /> <span>N3</span></label>
+                <label><input type="checkbox" value="N2" /> <span>N2</span></label>
+                <label><input type="checkbox" value="N1" /> <span>N1</span></label>
+              </div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="daily-only" class="btn btn-ghost btn-sm">Only my level</button>
+            <button id="daily-below" class="btn btn-ghost btn-sm">My level &amp; below</button>
+            <button id="daily-export" class="btn btn-ghost btn-sm" title="Download a JSON backup of your progress">Export progress</button>
+            <button id="daily-import-btn" class="btn btn-ghost btn-sm">Import</button>
+            <input type="file" id="daily-import" accept="application/json" class="hidden" />
+          </div>
         </div>
-        <div id="acct-msg" class="stats"></div>
+
+        <div class="section-head">
+          <h2>Popular Focus Decks</h2>
+          <span class="chip chip-quiet" id="deck-note">Tracked by SRS memory</span>
+        </div>
+        <div class="deck-grid" id="daily-decks"></div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Today's SRS Queue</h2>
+              <p class="sub" id="daily-progress">0/0 done today</p>
+            </div>
+            <span class="chip chip-brand" id="daily-new-count">0 new</span>
+          </div>
+          <div class="progressbar"><div id="daily-bar"></div></div>
+          <div class="grid" id="daily-new"></div>
+          <div class="sub-head">
+            <h3>Reviews due</h3>
+            <span class="chip chip-quiet" id="daily-rev-count">0</span>
+          </div>
+          <div class="grid" id="daily-rev"></div>
+          <div class="btn-row end">
+            <button class="btn btn-ghost btn-sm" id="sess-learn">Learn today's kanji</button>
+          </div>
+        </div>
+
+        <div class="card" id="sess-box">
+          <div class="card-head">
+            <h3>Guided Session</h3>
+            <div class="btn-row tight">
+              <button id="sess-prev" class="btn btn-ghost btn-sm">← Prev</button>
+              <button id="sess-next-2" class="btn btn-ghost btn-sm">Next →</button>
+            </div>
+          </div>
+          <p class="stats" id="sess-status">Press Start to walk through today's kanji one by one.</p>
+          <div id="sess-card" class="sess-card"></div>
+        </div>
+
+        <div id="daily-done" class="card done-card hidden">
+          <div class="card-head">
+            <h3>✅ Done for today — お疲れ様！</h3>
+          </div>
+          <p id="daily-summary" class="sub"></p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Overall Progress</h3>
+            <span id="daily-stats" class="chip chip-quiet">—</span>
+          </div>
+          <div id="daily-levels" class="lvl-list"></div>
+        </div>
       </div>
+
+      <aside class="rail">
+        <div class="card ring-card">
+          <div class="card-head">
+            <h3>Daily Target Ring</h3>
+            <span class="chip chip-quiet" id="ring-goal">Goal —</span>
+          </div>
+          <div class="ring" id="daily-ring" style="--p:0">
+            <div class="ring-inner"><b id="ring-pct">0%</b><span>DONE</span></div>
+          </div>
+          <div class="ring-stats" id="ring-stats"></div>
+          <div class="sub-head"><h3>Active Streak</h3></div>
+          <div class="week-strip" id="week-strip"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Mnemonic Memory Aid</h3>
+          </div>
+          <p class="sub">Build a scene around the character's shape — a round sun with a horizon mark reads as <b>日</b> instantly.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Keyboard</h3>
+          </div>
+          <ul class="keylist">
+            <li><span>Answer 1–4</span><kbd>1</kbd></li>
+            <li><span>Next question</span><kbd>Enter</kbd></li>
+            <li><span>Focus search</span><kbd>⌘K</kbd></li>
+            <li><span>Close / blur</span><kbd>Esc</kbd></li>
+          </ul>
+        </div>
+      </aside>
     </div>
-    <div class="controls">
-      <span>Study scope (new + reviews from):</span>
-      <div class="levels" id="daily-scope">
-        <label><input type="checkbox" value="N5" /> N5</label>
-        <label><input type="checkbox" value="N4" /> N4</label>
-        <label><input type="checkbox" value="N3" /> N3</label>
-        <label><input type="checkbox" value="N2" /> N2</label>
-        <label><input type="checkbox" value="N1" /> N1</label>
-      </div>
-      <button id="daily-only" class="small">Only my level</button>
-      <button id="daily-below" class="small">My level &amp; below</button>
-    </div>
-    <div id="daily-progress" class="stats"></div>
-    <div class="progressbar"><div id="daily-bar"></div></div>
-    <h3>🎯 Guided session</h3>
-    <div id="sess-box" class="sess">
-      <div id="sess-status" class="stats">Press Start to learn today's kanji one by one, then type-quiz yourself.</div>
-      <div id="sess-card"></div>
-      <div class="controls">
-        <button id="sess-learn">1 · Learn</button>
-        <button id="sess-quiz">2 · Quiz (typing)</button>
-        <button id="sess-prev" class="small">← Prev</button>
-        <button id="sess-next" class="small">Next →</button>
-      </div>
-    </div>
-    <details id="browse-details">
-      <summary>📋 Browse all cards (grid — click to expand)</summary>
-      <h3>🆕 New kanji (<span id="daily-new-count">0</span>)</h3>
-      <div id="daily-new" class="grid"></div>
-      <h3>🔁 Reviews due (<span id="daily-rev-count">0</span>)</h3>
-      <div id="daily-rev" class="grid"></div>
-    </details>
-    <div id="daily-done" class="hidden">
-      <h3>✅ Done for today — お疲れ様！</h3>
-      <p id="daily-summary"></p>
-    </div>
-    <h3>📊 Overall</h3>
-    <div id="daily-stats" class="stats"></div>
-    <div id="daily-levels"></div>
   </section>
 
-  <!-- LIBRARY -->
+  <!-- ================= LIBRARY ================= -->
   <section id="tab-library" class="tab-panel">
-    <div class="controls">
-      <div class="levels" id="lib-levels">
-        <label><input type="checkbox" value="N5" checked /> N5</label>
-        <label><input type="checkbox" value="N4" checked /> N4</label>
-        <label><input type="checkbox" value="N3" checked /> N3</label>
-        <label><input type="checkbox" value="N2" /> N2</label>
-        <label><input type="checkbox" value="N1" /> N1</label>
+    <div class="page-head">
+      <div>
+        <p class="eyebrow">Catalog · General Joyo Index</p>
+        <h1>Kanji Explorer &amp; Lexicon</h1>
+      </div>
+      <div class="head-tools">
+        <span class="chip chip-brand" id="lib-stats">—</span>
+        <label class="field field-inline">
+          <span class="eyebrow">Sort</span>
+          <select id="lib-sort">
+            <option value="freq">Frequency</option>
+            <option value="strokes">Stroke count</option>
+            <option value="level">Level</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="filter-row">
+      <div class="levels seg" id="lib-levels">
+        <label><input type="checkbox" value="N5" checked /><span>N5</span></label>
+        <label><input type="checkbox" value="N4" checked /><span>N4</span></label>
+        <label><input type="checkbox" value="N3" checked /><span>N3</span></label>
+        <label><input type="checkbox" value="N2" /><span>N2</span></label>
+        <label><input type="checkbox" value="N1" /><span>N1</span></label>
       </div>
       <input id="lib-search" type="search" placeholder="Search kanji, meaning, reading… e.g. 食, food, ショク" />
-      <select id="lib-sort">
-        <option value="freq">Sort: frequency</option>
-        <option value="strokes">Sort: strokes</option>
-        <option value="level">Sort: level</option>
-      </select>
+      <div class="legend">
+        <span><i class="dot learned"></i>Mastered</span>
+        <span><i class="dot due"></i>In learning</span>
+        <span><i class="dot new"></i>Unseen</span>
+      </div>
     </div>
-    <div id="lib-stats" class="stats"></div>
-    <div id="lib-grid" class="grid"></div>
-    <div id="lib-pager"></div>
+
+    <div class="split">
+      <div class="col-main">
+        <div id="lib-grid" class="grid"></div>
+        <div id="lib-pager" class="pager"></div>
+      </div>
+
+      <aside class="rail">
+        <div class="card" id="lib-preview-card">
+          <div class="card-head">
+            <h3>Character Preview</h3>
+            <span class="chip chip-quiet">Click any card</span>
+          </div>
+          <div id="lib-preview" class="preview">
+            <p class="sub">Pick a kanji from the grid to inspect its readings and vocabulary.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Study Log</h3></div>
+          <p class="sub" id="lib-log">—</p>
+        </div>
+      </aside>
+    </div>
   </section>
 
-  <!-- QUIZ -->
+  <!-- ================= TEST ================= -->
   <section id="tab-quiz" class="tab-panel">
-    <div class="quiz-setup">
-      <div class="setup-head"><h2>Test setup</h2><span id="quiz-active" class="pill-live hidden">● Active Session</span></div>
-      <div class="row">
-        <span>Scope:</span>
-        <div class="levels" id="quiz-levels">
-          <label><input type="checkbox" value="N5" checked /> N5</label>
-          <label><input type="checkbox" value="N4" checked /> N4</label>
-          <label><input type="checkbox" value="N3" checked /> N3</label>
-          <label><input type="checkbox" value="N2" /> N2</label>
-          <label><input type="checkbox" value="N1" /> N1</label>
+    <div class="page-head compact">
+      <div class="scope-row">
+        <span class="eyebrow">Scope</span>
+        <div class="levels seg" id="quiz-levels">
+          <label><input type="checkbox" value="N5" checked /><span>N5</span></label>
+          <label><input type="checkbox" value="N4" checked /><span>N4</span></label>
+          <label><input type="checkbox" value="N3" checked /><span>N3</span></label>
+          <label><input type="checkbox" value="N2" /><span>N2</span></label>
+          <label><input type="checkbox" value="N1" /><span>N1</span></label>
         </div>
-        <button id="preset-n5n4" class="small">N5–N4 only</button>
-        <button id="preset-n3n1" class="small">N3–N1</button>
-        <button id="preset-all" class="small">All</button>
-        <label title="Only quiz kanji/words you have graded in Daily"><input type="checkbox" id="quiz-learned" /> Learned only</label>
+        <span class="eyebrow">Mode</span>
+        <select id="quiz-mode">
+          <option value="kanji-reading">Kanji → Reading</option>
+          <option value="reading-kanji">Reading → Kanji</option>
+          <option value="compound-reading">Word → Reading</option>
+        </select>
+        <span class="eyebrow">Target</span>
+        <select id="quiz-count">
+          <option>5</option>
+          <option selected>10</option>
+          <option>20</option>
+          <option>30</option>
+        </select>
+        <button id="quiz-start" class="btn btn-primary">Start Quiz</button>
       </div>
-      <div class="row">
-        <label>Mode:
-          <select id="quiz-mode">
-            <option value="kanji-reading">Kanji → Reading (pick the kana)</option>
-            <option value="reading-kanji">Reading → Kanji (pick the kanji)</option>
-            <option value="compound-reading">Word → Reading (pick the kana)</option>
-          </select>
-        </label>
-        <label>Readings:
+      <div class="scope-row sub-row">
+        <label class="field field-inline">
+          <span class="eyebrow">Readings</span>
           <select id="quiz-family">
             <option value="auto">Auto (both)</option>
-            <option value="on">カタカナ Onyomi</option>
-            <option value="kun">ひらがな Kunyomi</option>
+            <option value="on">Onyomi カタカナ</option>
+            <option value="kun">Kunyomi ひらがな</option>
           </select>
         </label>
-        <label>Questions:
-          <select id="quiz-count">
-            <option>5</option>
-            <option selected>10</option>
-            <option>20</option>
-            <option>30</option>
-          </select>
+        <label class="switch" title="Only quiz kanji/words you have graded in Daily">
+          <input type="checkbox" id="quiz-learned" /><span>Learned only</span>
         </label>
-        <button id="quiz-start">Start quiz</button>
+        <button id="preset-n5n4" class="btn btn-ghost btn-sm">N5–N4</button>
+        <button id="preset-n3n1" class="btn btn-ghost btn-sm">N3–N1</button>
+        <button id="preset-all" class="btn btn-ghost btn-sm">All</button>
+        <span id="quiz-active" class="chip chip-green hidden">● Active Session</span>
+        <span id="quiz-best" class="sub"></span>
       </div>
-      <div id="quiz-best" class="stats"></div>
     </div>
-    <div id="quiz-play" class="hidden">
-      <div id="quiz-progress"></div>
-      <div id="quiz-q" class="quiz-card"></div>
-      <div id="quiz-opts" class="quiz-opts"></div>
-      <div id="quiz-feedback"></div>
-      <button id="quiz-next" class="hidden">Next →</button>
+
+    <div class="split">
+      <div class="col-main">
+        <div id="quiz-play" class="hidden">
+          <div class="quiz-bar">
+            <span id="quiz-progress" class="sub"></span>
+          </div>
+          <div class="card quiz-prompt">
+            <div id="quiz-q" class="quiz-q"></div>
+            <div id="quiz-opts" class="quiz-opts"></div>
+            <div class="quiz-foot">
+              <span id="quiz-feedback" class="feedback"></span>
+              <button id="quiz-next" class="btn btn-primary hidden">Next →</button>
+            </div>
+          </div>
+        </div>
+        <div id="quiz-result" class="card hidden"></div>
+      </div>
+
+      <aside class="rail">
+        <div class="card exam-card">
+          <div class="card-head">
+            <h3>Online Exam</h3>
+            <span class="chip chip-green" id="exam-live">Ready</span>
+          </div>
+          <p class="sub">Live Kanji Proficiency Assessment</p>
+          <div class="stat-row">
+            <div class="stat-tile">
+              <span class="eyebrow">Score</span>
+              <b id="exam-score">0</b>
+              <small id="exam-sub">—</small>
+            </div>
+            <div class="stat-tile alt">
+              <span class="eyebrow">Remaining</span>
+              <b id="exam-time">--:--</b>
+              <small>elapsed</small>
+            </div>
+          </div>
+          <div class="progressbar thin"><div id="exam-bar"></div></div>
+          <div class="sub-head">
+            <h3>Questions</h3>
+            <span class="chip chip-quiet" id="exam-qcount">0 / 0</span>
+          </div>
+          <ol class="q-list" id="exam-qs"></ol>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Related Lessons</h3></div>
+          <ul class="linklist" id="quiz-related"></ul>
+        </div>
+      </aside>
     </div>
-    <div id="quiz-result" class="hidden"></div>
   </section>
 
-  <!-- COMPOUNDS -->
+  <!-- ================= COMPOUNDS ================= -->
   <section id="tab-compounds" class="tab-panel">
-    <h2>Vocabulary compounds — e.g. 飲 + 食 = 飲食, 洗濯機 = せんたっき</h2>
-    <p>Main list is the full vocab dataset (2+ kanji, including 3-character words like 洗濯機 and kana-mix like 食べ物). <b>Click a word</b> to see example phrases/sentences. Click a kanji to jump to its library entry.</p>
-    <div class="controls">
-      <div class="levels" id="comp-levels">
-        <label><input type="checkbox" value="N5" checked /> N5</label>
-        <label><input type="checkbox" value="N4" checked /> N4</label>
-        <label><input type="checkbox" value="N3" checked /> N3</label>
-        <label><input type="checkbox" value="N2" /> N2</label>
-        <label><input type="checkbox" value="N1" /> N1</label>
-      </div>
-      <input id="comp-search" type="search" placeholder="Search vocab… e.g. 洗濯機, せんたっき, washing machine" />
-      <select id="comp-length">
-        <option value="all">All lengths (2+ kanji)</option>
-        <option value="2">2-kanji only</option>
-        <option value="3plus">3+ kanji (e.g. 洗濯機)</option>
-        <option value="kana">Kana-mix (e.g. 食べ物)</option>
-      </select>
-    </div>
-    <h3>📖 Vocabulary</h3>
-    <div class="controls">
-      <button id="comp-shuffle">🔀 Shuffle</button>
-      <label><input type="checkbox" id="comp-furi" checked /> ふりがな</label>
-      <span class="stats">Random order every time you open this tab.</span>
-    </div>
-    <div id="comp-stats" class="stats"></div>
-    <div id="comp-list" class="comp-list"></div>
-    <button id="comp-more">Show more</button>
-    <details id="starter-details">
-      <summary>⭐ Starter combos (curated examples — click to expand)</summary>
-      <div id="curated-list" class="comp-list"></div>
-    </details>
-    <h3>➕ Add your own</h3>
-    <form id="custom-form" class="custom-form">
-      <input id="c-word" placeholder="Word 飲食" required />
-      <input id="c-reading" placeholder="Reading いんしょく" required />
-      <input id="c-meaning" placeholder="Meaning food and drink" required />
-      <input id="c-parts" placeholder="Parts 飲(drink) + 食(eat)" />
-      <button type="submit">Save (stored locally)</button>
-    </form>
-    <div id="custom-list" class="comp-list"></div>
-  </section>
-</main>
+    <div class="split">
+      <div class="col-main">
+        <div class="card feature" id="comp-feature">
+          <div class="card-head">
+            <h3>Featured Anatomy</h3>
+            <span class="chip chip-quiet" id="comp-feature-tag">Compound</span>
+          </div>
+          <div id="comp-feature-body" class="feature-body"></div>
+        </div>
 
+        <div class="filter-row">
+          <div class="levels seg" id="comp-levels">
+            <label><input type="checkbox" value="N5" checked /><span>N5</span></label>
+            <label><input type="checkbox" value="N4" checked /><span>N4</span></label>
+            <label><input type="checkbox" value="N3" checked /><span>N3</span></label>
+            <label><input type="checkbox" value="N2" /><span>N2</span></label>
+            <label><input type="checkbox" value="N1" /><span>N1</span></label>
+          </div>
+          <input id="comp-search" type="search" placeholder="Search vocab… e.g. 洗濯機, せんたっき, washing machine" />
+          <select id="comp-length">
+            <option value="all">All lengths (2+ kanji)</option>
+            <option value="2">2-kanji only</option>
+            <option value="3plus">3+ kanji (洗濯機)</option>
+            <option value="kana">Kana-mix (食べ物)</option>
+          </select>
+        </div>
+
+        <div class="section-head">
+          <h2>Compound Vocabulary</h2>
+          <div class="btn-row tight">
+            <button id="comp-shuffle" class="btn btn-ghost btn-sm">🔀 Shuffle</button>
+            <label class="switch"><input type="checkbox" id="comp-furi" checked /><span>ふりがな</span></label>
+            <span id="comp-stats" class="sub"></span>
+          </div>
+        </div>
+
+        <div id="comp-list" class="comp-list"></div>
+        <button id="comp-more" class="btn btn-ghost wide">Show more compounds</button>
+
+        <details id="starter-details" class="card">
+          <summary>⭐ Starter combos (curated examples)</summary>
+          <div id="curated-list" class="comp-list"></div>
+        </details>
+
+        <div class="card">
+          <div class="card-head"><h3>➕ Add your own</h3></div>
+          <form id="custom-form" class="custom-form">
+            <input id="c-word" placeholder="Word 飲食" required />
+            <input id="c-reading" placeholder="Reading いんしょく" required />
+            <input id="c-meaning" placeholder="Meaning food and drink" required />
+            <input id="c-parts" placeholder="Parts 飲(drink) + 食(eat)" />
+            <button type="submit" class="btn btn-primary">Save (stored locally)</button>
+          </form>
+          <div id="custom-list" class="comp-list"></div>
+        </div>
+      </div>
+
+      <aside class="rail">
+        <div class="card">
+          <div class="card-head">
+            <h3>Word Lab Drill</h3>
+            <span class="chip chip-quiet" id="drill-tag">Idle</span>
+          </div>
+          <div class="stat-row">
+            <div class="stat-tile">
+              <span class="eyebrow">Score</span>
+              <b id="drill-score">0</b>
+              <small id="drill-sub">—</small>
+            </div>
+            <div class="stat-tile alt">
+              <span class="eyebrow">Time</span>
+              <b id="drill-time">--:--</b>
+              <small>this round</small>
+            </div>
+          </div>
+          <div id="drill-body" class="drill-body">
+            <p class="sub">Pick a level scope below, then start a speed drill on compound readings.</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary wide" id="drill-start">Start drill</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Word Formation Rules</h3></div>
+          <ol class="rules" id="comp-rules"></ol>
+        </div>
+
+        <div class="card goal-card">
+          <div class="card-head"><h3>Daily Goal</h3></div>
+          <p class="sub">Study today's kanji, then drill their compounds to lock the reading in.</p>
+          <button class="btn btn-invert wide" id="comp-goal-btn">Open Daily</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============ MODALS ============ -->
 <div id="kanji-detail" class="modal hidden">
   <div class="modal-card">
-    <button id="detail-close">✕</button>
+    <button id="detail-close" class="modal-x" aria-label="Close">✕</button>
     <div id="detail-body"></div>
   </div>
 </div>
 
-<footer>
-  <span><b>Kanji Practice © 2024</b> · Data: OpenJLPT (CC BY-SA 4.0)</span>
-  <span class="shortcuts">Shortcuts: <kbd>1–4</kbd> Answer <kbd>Enter</kbd> Next <kbd>⌘K</kbd>/<kbd>/</kbd> Search</span>
-</footer>
+<div id="help-modal" class="modal hidden">
+  <div class="modal-card sm">
+    <button id="help-close" class="modal-x" aria-label="Close">✕</button>
+    <h3>Keyboard Shortcuts</h3>
+    <ul class="keylist">
+      <li><span>Answer question</span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></li>
+      <li><span>Next question</span><kbd>Enter</kbd></li>
+      <li><span>Focus search</span><kbd>⌘K</kbd> / <kbd>/</kbd></li>
+      <li><span>Close dialog</span><kbd>Esc</kbd></li>
+    </ul>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

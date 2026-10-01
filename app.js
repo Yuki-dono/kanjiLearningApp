@@ -3,6 +3,7 @@ let KANJI = [];   // {character, level, onyomi[], kunyomi[], meanings[], strokes
 let VOCAB = [];   // {word, reading, meanings[], level}
 let kanjiMap = new Map();
 let libPage = 1;
+let libFocus = null;       // character shown in the library preview rail
 const LIB_PAGE_SIZE = 24;
 let compShown = 60;
 
@@ -21,7 +22,37 @@ async function loadData() {
   renderCompounds();
   renderBest();
   initDaily();
+  paintFeatureAnatomy();
+  paintCompRules();
+  paintRelated();
   supaInit();
+}
+
+// ---------- inline icon set ----------
+const ICONS = {
+  sun:   '<path d="M12 3v2M12 19v2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M3 12h2M19 12h2M5.6 18.4L7 17M17 7l1.4-1.4"/><circle cx="12" cy="12" r="4"/>',
+  book:  '<path d="M4 5.5A2.5 2.5 0 016.5 3H19v15H6.5A2.5 2.5 0 004 20.5z"/><path d="M4 20.5A2.5 2.5 0 016.5 18H19v3H6.5"/><path d="M9 7h6"/>',
+  check: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M9 3.2V5M15 3.2V5"/><path d="M8.5 13l2.5 2.5 4.5-5.5"/>',
+  layers:'<path d="M12 3l8.5 4.5L12 12 3.5 7.5z"/><path d="M3.5 12.5L12 17l8.5-4.5"/><path d="M3.5 17L12 21.5 20.5 17"/>',
+  kbd:   '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9.5h.01M10 9.5h.01M14 9.5h.01M18 9.5h.01M8 15h8"/>',
+  moon:  '<path d="M20.5 14.5A8.5 8.5 0 019.5 3.5a8.5 8.5 0 1011 11z"/>',
+  menu:  '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>',
+  bulb:  '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 00-3.5 10.9c.5.4.8 1 .8 1.6v.5h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0012 3z"/>',
+  play:  '<path d="M7 4.5l12 7.5-12 7.5z"/>',
+  eye:   '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+};
+function icon(name, size = 16) {
+  const d = ICONS[name] || "";
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+function paintIcons(root = document) {
+  root.querySelectorAll("[data-ico]").forEach(el => {
+    if (el.dataset.painted) return;
+    el.innerHTML = icon(el.dataset.ico, Number(el.dataset.icoSize) || 16);
+    el.style.display = "inline-flex";
+    el.dataset.painted = "1";
+  });
 }
 
 // ---------- tabs ----------
@@ -31,12 +62,41 @@ document.querySelectorAll(".tabs button").forEach(btn => {
     document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    document.getElementById("app").classList.remove("nav-open");
     // reshuffle compounds every time the tab is opened
     if (btn.dataset.tab === "compounds" && KANJI.length) {
       shuffleCompounds();
     }
   };
 });
+
+// ---------- sidebar (mobile drawer + prefs) ----------
+function closeNav() { document.getElementById("app").classList.remove("nav-open"); }
+document.getElementById("menu-btn").onclick = () => document.getElementById("app").classList.toggle("nav-open");
+document.getElementById("nav-scrim").onclick = closeNav;
+document.getElementById("side-shortcuts").onclick = () => {
+  document.getElementById("help-modal").classList.remove("hidden");
+  closeNav();
+};
+document.getElementById("help-close").onclick = () =>
+  document.getElementById("help-modal").classList.add("hidden");
+document.getElementById("side-theme").onclick = toggleTheme;
+document.getElementById("comp-goal-btn").onclick = () => {
+  document.querySelector("[data-tab='daily']").click();
+};
+// scrollIntoView isn't implemented in every environment (and is a no-op when the
+// element is already in view) — guard so a missing impl can't break a click handler
+function scrollTo(el, opts) {
+  try { el?.scrollIntoView?.(opts); } catch {}
+}
+
+function toggleTheme() {
+  const dark = !document.documentElement.classList.contains("dark");
+  document.documentElement.classList.toggle("dark", dark);
+  try { localStorage.setItem("kanji-theme", dark ? "dark" : "light"); } catch {}
+  paintTheme();
+  closeNav();
+}
 
 // ---------- library ----------
 function libFilters() {
@@ -62,25 +122,32 @@ function renderLibrary() {
   const list = libFilters();
   const pages = Math.max(1, Math.ceil(list.length / LIB_PAGE_SIZE));
   libPage = Math.min(Math.max(1, libPage), pages);
+  const from = list.length ? (libPage - 1) * LIB_PAGE_SIZE + 1 : 0;
+  const to = Math.min(libPage * LIB_PAGE_SIZE, list.length);
   document.getElementById("lib-stats").textContent =
-    `${list.length} kanji · page ${libPage}/${pages}`;
+    `Showing ${from}–${to} of ${list.length.toLocaleString()} characters`;
   const grid = document.getElementById("lib-grid");
   grid.innerHTML = "";
+  if (!list.length) {
+    grid.innerHTML = '<p class="sub" style="grid-column:1/-1">No kanji match this filter — try another level or search term.</p>';
+  }
   list.slice((libPage - 1) * LIB_PAGE_SIZE, libPage * LIB_PAGE_SIZE).forEach(k => {
     const d = document.createElement("div");
-    d.className = "card";
+    d.className = "card tile" + (libFocus === k.character ? " is-focus" : "");
     let dot = "";
     try {
       const st = srsStatus(k.character);
       if (st === "new") dot = '<span class="dot new" title="new today"></span>';
       else if (st === "due") dot = '<span class="dot due" title="review due"></span>';
-      else if (st === "learned") dot = '<span class="dot learned" title="learned"></span>';
+      else if (st === "learned") dot = '<span class="dot learned" title="mastered"></span>';
     } catch {}
-    d.innerHTML = `<span class="badge">${k.level}</span>${dot}<div class="k">${k.character}</div>
-      <div class="m">${k.meanings.slice(0,2).join(", ")}</div>
-      <div class="r">${(k.onyomi||[]).slice(0,2).join("・")||"—"} · ${(k.kunyomi||[]).slice(0,2).join("・")||"—"}</div>
-      <div class="strokes">${k.strokes ?? "—"}画</div>`;
-    d.onclick = () => showDetail(k.character);
+    d.innerHTML = `<div class="tile-top"><span class="badge">${k.level}</span>${dot}</div>
+      <div class="k">${k.character}</div>
+      <div class="m">${esc(k.meanings.slice(0,2).join(", "))}</div>
+      <div class="r">${esc((k.onyomi||[]).slice(0,2).join("・")||"—")} · ${esc((k.kunyomi||[]).slice(0,2).join("・")||"—")}</div>
+      <div class="strokes">${k.strokes ?? "—"} strokes</div>
+      <span class="tile-go" aria-hidden="true">${icon("eye",14)}</span>`;
+    d.onclick = () => { libFocus = k.character; paintLibPreview(k.character); renderLibrary(); };
     grid.appendChild(d);
   });
   renderLibPager(pages);
@@ -97,11 +164,11 @@ function renderLibPager(pages) {
     b.onclick = () => {
       libPage = Math.min(Math.max(1, p), pages);
       renderLibrary();
-      document.getElementById("lib-grid").scrollIntoView({ block: "start" });
+      scrollTo(document.getElementById("lib-grid"), { block: "start" });
     };
     box.appendChild(b);
   };
-  go(libPage - 1, "← Previous", libPage <= 1);
+  go(libPage - 1, "← Prev", libPage <= 1);
   const nums = [...new Set([1, pages, libPage - 1, libPage, libPage + 1])]
     .filter(n => n >= 1 && n <= pages).sort((a, b) => a - b);
   let prev = 0;
@@ -118,29 +185,94 @@ function renderLibPager(pages) {
   go(libPage + 1, "Next →", libPage >= pages);
 }
 
+// right-rail preview: full character dossier, no modal needed
+function paintLibPreview(ch) {
+  const box = document.getElementById("lib-preview");
+  if (!box) return;
+  const k = kanjiMap.get(ch);
+  if (!k) {
+    box.innerHTML = '<p class="sub">Pick a kanji from the grid to inspect its readings and vocabulary.</p>';
+    return;
+  }
+  const words = VOCAB.filter(v => v.word.includes(ch)).slice(0, 6);
+  let st = "", dot = "";
+  try {
+    st = srsStatus(ch);
+    if (st === "learned") dot = '<span class="dot learned"></span>';
+    else if (st === "due") dot = '<span class="dot due"></span>';
+    else if (st === "new") dot = '<span class="dot new"></span>';
+  } catch {}
+  const lvStat = ` JLPT ${esc(k.level)}`;
+  box.innerHTML = `
+    <div class="pv-kanji">${esc(ch)}</div>
+    <div class="pv-sub">
+      <span class="chip chip-brand">${lvStat}</span>
+      ${dot ? `<span class="chip chip-quiet">${esc(st === "learned" ? "Mastered" : st === "due" ? "In learning" : "Unseen")}</span>` : ""}
+      <span class="chip chip-quiet">${k.strokes ?? "—"} strokes</span>
+    </div>
+    <p class="pv-meaning">${esc(k.meanings.join(", "))}</p>
+    <div class="pv-fam">
+      <div class="fam"><p class="eyebrow">On'yomi · 音読み</p><div class="val">${esc((k.onyomi||[]).join("・")||"—")}</div></div>
+      <div class="fam"><p class="eyebrow">Kun'yomi · 訓読み</p><div class="val">${esc((k.kunyomi||[]).join("・")||"—")}</div></div>
+    </div>
+    <div class="pv-compounds">
+      <p class="eyebrow" style="margin-bottom:7px">Frequent compounds</p>
+      ${words.map(v => `<button class="cv" data-w="${esc(v.word)}">
+          <span class="w">${esc(v.word)}</span>
+          <span class="r">${esc(v.reading)}</span>
+          <span class="m">${esc(v.meanings.slice(0,2).join(", "))}</span>
+          <span class="tag">${esc(v.level)}</span>
+        </button>`).join("") || '<p class="sub">No vocabulary entries reference this kanji yet.</p>'}
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary btn-sm" id="pv-practice">${icon("play",12)} Practice this kanji</button>
+      <button class="btn btn-ghost btn-sm" id="pv-open">Full details</button>
+    </div>`;
+  box.querySelectorAll(".cv").forEach(b => b.onclick = () => {
+    const [wordChar] = [b.dataset.w].flat();
+    const target = [...wordChar].find(c => kanjiMap.has(c));
+    if (target) { libFocus = target; paintLibPreview(target); renderLibrary(); }
+  });
+  const pr = box.querySelector("#pv-practice");
+  if (pr) pr.onclick = () => {
+    document.querySelector("[data-tab='quiz']").click();
+    setQuizLevels([k.level]);
+    document.getElementById("quiz-mode").value = "kanji-reading";
+    document.getElementById("quiz-count").value = "10";
+    document.getElementById("quiz-start").click();
+  };
+  const op = box.querySelector("#pv-open");
+  if (op) op.onclick = () => showDetail(ch);
+}
+
+// full-detail modal (kept for the Compounds tab + full details button)
 function showDetail(ch) {
   const k = kanjiMap.get(ch);
   if (!k) return;
   const examples = VOCAB.filter(v => v.word.includes(ch)).slice(0, 8);
   document.getElementById("detail-body").innerHTML = `
-    <h2>${k.character} <span class="badge">${k.level}</span></h2>
-    <p><b>Meaning:</b> ${k.meanings.join(", ")}</p>
-    <p><b>Onyomi:</b> ${(k.onyomi||[]).join("、")||"—"}</p>
-    <p><b>Kunyomi:</b> ${(k.kunyomi||[]).join("、")||"—"}</p>
-    <p><b>Strokes:</b> ${k.strokes ?? "—"}</p>
+    <h2>${esc(ch)} <span class="badge">${esc(k.level)}</span></h2>
+    <p><b>Meaning</b> ${esc(k.meanings.join(", "))}</p>
+    <p><b>On'yomi</b> ${esc((k.onyomi||[]).join("、")||"—")}</p>
+    <p><b>Kun'yomi</b> ${esc((k.kunyomi||[]).join("、")||"—")}</p>
+    <p><b>Strokes</b> ${k.strokes ?? "—"}</p>
     <h4>Example words</h4>
-    <ul>${examples.map(v => `<li>${v.word} (${v.reading}) — ${v.meanings.join(", ")} [${v.level}]</li>`).join("") || "<li>—</li>"}</ul>`;
+    <ul>${examples.map(v => `<li><b>${esc(v.word)}</b> (${esc(v.reading)}) — ${esc(v.meanings.join(", "))} [${esc(v.level)}]</li>`).join("") || "<li>—</li>"}</ul>`;
   document.getElementById("kanji-detail").classList.remove("hidden");
 }
 
 document.getElementById("detail-close").onclick = () =>
   document.getElementById("kanji-detail").classList.add("hidden");
+document.getElementById("kanji-detail").onclick = (e) => {
+  if (e.target.id === "kanji-detail") e.currentTarget.classList.add("hidden");
+};
 document.getElementById("lib-search").oninput = () => { libPage = 1; renderLibrary(); };
 document.getElementById("lib-sort").onchange = renderLibrary;
 document.querySelectorAll("#lib-levels input").forEach(i => i.onchange = () => { libPage = 1; renderLibrary(); });
 
 // ---------- quiz ----------
 let quiz = { items: [], idx: 0, score: 0, mode: "kanji-reading", answers: [] };
+let quizTimer = null, quizStartAt = 0, examTick = null;
 
 function shuffle(a) { for (let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
 function sample(arr, n, exclude) {
@@ -226,10 +358,17 @@ function setQuizLevels(ls) {
 
 function renderBest() {
   const el = document.getElementById("quiz-best");
+  if (!el) return;
   try {
     const best = JSON.parse(localStorage.getItem("kanji-best") || "{}");
-    const txt = LEVELS.map(l => best[l] ? `${l}: ${best[l]}` : null).filter(Boolean).join(" · ");
-    el.textContent = txt ? "Best scores — " + txt : "No scores yet. Scores save per level-scope in this browser.";
+    // keys are the quiz scope string (e.g. "N5+N4" or "N5+N4+learned"),
+    // so read the stored object rather than assuming single-level keys
+    const pretty = (k) => k.replace(/\+/g, "·").replace("learned", "learned only");
+    const txt = Object.entries(best)
+      .sort((a, b) => LEVELS.indexOf(a[0][0]) - LEVELS.indexOf(b[0][0]))
+      .map(([k, v]) => `${pretty(k)}: ${v}`)
+      .join("  ·  ");
+    el.textContent = txt ? "Best — " + txt : "";
   } catch { el.textContent = ""; }
 }
 
@@ -272,8 +411,67 @@ document.getElementById("quiz-start").onclick = () => {
   document.getElementById("quiz-play").classList.remove("hidden");
   document.getElementById("quiz-result").classList.add("hidden");
   document.getElementById("quiz-active").classList.remove("hidden");
+  scrollTo(document.querySelector(".page-head.compact"), { block: "start", behavior: "smooth" });
+  startQuizTimer();
+  examReset();
   showQuizQ();
 };
+
+function startQuizTimer() {
+  clearInterval(quizTimer);
+  quizStartAt = Date.now();
+  const el = document.getElementById("exam-time");
+  el.textContent = "00:00";
+  document.getElementById("exam-live").textContent = "Live";
+  quizTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - quizStartAt) / 1000);
+    el.textContent = `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`;
+  }, 1000);
+}
+function stopQuizTimer() {
+  clearInterval(quizTimer); quizTimer = null;
+}
+
+// right-rail exam panel: score, progress, per-question navigator
+function examReset() {
+  const list = document.getElementById("exam-qs");
+  if (!list) return;
+  list.innerHTML = "";
+  quiz.items.forEach((q, i) => {
+    const li = document.createElement("li");
+    li.id = "exam-q" + i;
+    li.innerHTML = `<span class="qn">Q${i + 1}</span><span class="qt">${esc(q.prompt)}</span>
+      <span class="qa"></span><span class="st"></span>`;
+    list.appendChild(li);
+  });
+  document.getElementById("exam-qcount").textContent = `0 / ${quiz.items.length}`;
+  document.getElementById("exam-bar").style.width = "0%";
+  examPaint();
+}
+function examPaint() {
+  const list = document.getElementById("exam-qs");
+  if (!list) return;
+  [...list.children].forEach((li, i) => {
+    const a = quiz.answers[i];
+    li.className = "";
+    if (a) li.classList.add(a.correct ? "done" : "miss");
+    else if (i === quiz.idx) li.classList.add("active");
+    li.querySelector(".qa").textContent = a ? `→ ${a.q.answer}` : "";
+    li.querySelector(".st").innerHTML = a
+      ? `<span class="dot ${a.correct ? "learned" : "due"}"></span>`
+      : (i === quiz.idx ? `<span class="chip chip-brand" style="padding:1px 6px;font-size:9px">Active</span>` : "");
+  });
+  document.getElementById("exam-score").textContent = quiz.score;
+  document.getElementById("exam-sub").textContent = `+${quiz.answers.length} answered`;
+  document.getElementById("exam-qcount").textContent = `${quiz.answers.length} / ${quiz.items.length}`;
+  document.getElementById("exam-bar").style.width =
+    (quiz.items.length ? quiz.answers.length / quiz.items.length * 100 : 0) + "%";
+}
+
+function updateQuizProgress() {
+  document.getElementById("quiz-progress").textContent =
+    `Question ${Math.min(quiz.idx + 1, quiz.items.length)} of ${quiz.items.length} · Score ${quiz.score} · Scope ${quiz.scope}`;
+}
 
 // compound pool: 2+ kanji words with hiragana readings (optionally only learned kanji)
 // words with multiple readings (e.g. 二人 ふたり/ににん) are excluded —
@@ -317,11 +515,6 @@ function buildCompoundReading(poolW, fixedV) {
   return { kind: "compound-reading", prompt: v.word,
     sub: `${v.meanings.join(", ")} [${v.level}] — pick the reading`,
     answer: ans, opts, ch: null };
-}
-
-function updateQuizProgress() {
-  document.getElementById("quiz-progress").textContent =
-    `Q ${Math.min(quiz.idx + 1, quiz.items.length)}/${quiz.items.length} · Score ${quiz.score} · Scope ${quiz.scope}`;
 }
 
 function makeQuestion(m, poolK) {
@@ -386,7 +579,7 @@ function pickKanjiWith(poolK, fam, tries = 30, fixedK = null) {
 }
 
 function familyTag(fam) {
-  return fam === "on" ? "on'yomi カタカナ" : "kun'yomi ひらがな";
+  return fam === "on" ? "On'yomi 音読み" : "Kun'yomi 訓読み";
 }
 
 // Kanji flashes big, meaning shown below; choices are kana readings only (same script)
@@ -405,7 +598,9 @@ function buildKanjiReading(poolK, fam, fixedK = null) {
     }))];
     const opts = shuffle([ans, ...pickConfusingDistractors(pool, ans, 3)]);
     if (opts.length >= 4) return { kind: "kanji-reading", prompt: k.character,
-      sub: `${k.meanings.join(", ")} · ${familyTag(f)} [${k.level}]`, answer: ans, opts, ch: k.character };
+      sub: `${k.meanings.join(", ")} · ${familyTag(f)} [${k.level}]`,
+      hint: "Identify the correct Japanese reading for this character",
+      answer: ans, opts, ch: k.character };
   }
   return null;
 }
@@ -430,11 +625,14 @@ function buildReadingKanji(poolK, fam, fixedK = null) {
     if (chosen.length < 3) continue;
     const opts = shuffle([k.character, ...chosen.map(kk => kk.character)]);
     return { kind: "reading-kanji", prompt: r,
-      sub: `${k.meanings.join(", ")} · ${familyTag(f)} [${k.level}] — pick the kanji`, answer: k.character, opts, ch: k.character };
+      sub: `${k.meanings.join(", ")} · ${familyTag(f)} [${k.level}]`,
+      hint: "Pick the kanji that matches this reading",
+      answer: k.character, opts, ch: k.character };
   }
   return null;
 }
 
+const KANJI_RE = /^[\u3400-\u9FFF]$/;
 function showQuizQ() {
   let q = quiz.items[quiz.idx];
   // safety net: never render blank/duplicate options (regenerate the question if needed)
@@ -449,15 +647,28 @@ function showQuizQ() {
     }
   }
   updateQuizProgress();
-  document.getElementById("quiz-q").innerHTML = `${q.prompt}<div style="font-size:1rem;color:#555">${q.sub}</div>`;
+  const isKanji = KANJI_RE.test(String(q.prompt));
+  const kInfo = q.ch ? kanjiMap.get(q.ch) : kanjiMap.get(q.prompt);
+  const lvl = (q.sub || "").match(/\[(N\d)\]/)?.[1] || kInfo?.level;
+  const modeTag = q.kind === "compound-reading" ? "Compound" : q.kind === "reading-kanji" ? "Reading → Kanji" : "Kanji → Reading";
+  document.getElementById("quiz-q").innerHTML =
+    `<div class="q-tags">
+       <span class="chip chip-brand">${esc(modeTag)}</span>
+       ${lvl ? `<span class="chip chip-quiet">JLPT ${esc(lvl)}</span>` : ""}
+       ${kInfo && kInfo.strokes ? `<span class="chip chip-quiet">${kInfo.strokes} strokes</span>` : ""}
+     </div>
+     <div class="${isKanji ? "q-kanji" : "q-kana"}">${esc(q.prompt)}</div>
+     <div class="q-mean">${esc((q.sub || "").split(" · ")[0].replace(/\s*\[N\d\].*$/, ""))}</div>
+     <p class="q-hint">${esc(q.hint || "Pick the correct option")}</p>`;
   const box = document.getElementById("quiz-opts");
   box.innerHTML = "";
   document.getElementById("quiz-feedback").textContent = "";
+  document.getElementById("quiz-feedback").className = "feedback";
   document.getElementById("quiz-next").classList.add("hidden");
   q.opts.forEach((opt, idx) => {
     const b = document.createElement("button");
     b.dataset.opt = opt;
-    b.innerHTML = `<span class="opt-num">${idx + 1}</span><span class="opt-val">${esc(opt)}</span>`;
+    b.innerHTML = `<span class="opt-num">${idx + 1}</span><span class="opt-val">${esc(opt)}</span><span class="opt-check"></span>`;
     b.onclick = () => {
       const correct = opt === q.answer;
       if (correct) quiz.score++;
@@ -465,15 +676,24 @@ function showQuizQ() {
       try { if (q.ch) srsQuizTouch(q.ch, correct); } catch {}
       [...box.children].forEach(x => {
         x.disabled = true;
-        if (x.dataset.opt === q.answer) x.classList.add("correct");
-        else if (x === b && !correct) x.classList.add("wrong");
+        if (x.dataset.opt === q.answer) {
+          x.classList.add("correct");
+          x.querySelector(".opt-check").textContent = "✓";
+        } else if (x === b && !correct) {
+          x.classList.add("wrong");
+          x.querySelector(".opt-check").textContent = "✕";
+        }
       });
-      document.getElementById("quiz-feedback").textContent = correct ? "✅ Correct!" : `❌ Correct answer: ${q.answer}`;
+      const fb = document.getElementById("quiz-feedback");
+      fb.className = "feedback " + (correct ? "ok" : "no");
+      fb.textContent = correct ? "✓ Correct!" : `✕ Correct answer: ${q.answer}`;
       document.getElementById("quiz-next").classList.remove("hidden");
       updateQuizProgress(); // counter + score refresh the moment you answer
+      examPaint();
     };
     box.appendChild(b);
   });
+  examPaint();
 }
 
 document.getElementById("quiz-next").onclick = () => {
@@ -484,13 +704,19 @@ document.getElementById("quiz-next").onclick = () => {
 
 function showResult() {
   document.getElementById("quiz-play").classList.add("hidden");
+  stopQuizTimer();
   const r = document.getElementById("quiz-result");
   r.classList.remove("hidden");
   document.getElementById("quiz-active").classList.add("hidden");
+  document.getElementById("exam-live").textContent = "Done";
   const pct = Math.round(quiz.score / quiz.items.length * 100);
-  r.innerHTML = `<h3>Result: ${quiz.score}/${quiz.items.length} (${pct}%)</h3>
-    <ul>${quiz.answers.map((a,i) => `<li>Q${i+1} ${a.q.prompt} → ${a.q.answer} — you: ${a.picked} ${a.correct?"✅":"❌"}</li>`).join("")}</ul>
-    <button onclick="document.getElementById('quiz-start').click()">Retry</button>`;
+  const secs = Math.max(0, Math.round((Date.now() - quizStartAt) / 1000));
+  r.innerHTML = `<h3>Result: ${quiz.score}/${quiz.items.length} — ${pct}% · ${Math.floor(secs/60)}m ${secs%60}s</h3>
+    <ul>${quiz.answers.map((a,i) => `<li>Q${i+1} <span class="pk">${esc(a.q.prompt)}</span> → ${esc(a.q.answer)} — you: ${esc(a.picked)} ${a.correct?"✓":"✕"}</li>`).join("")}</ul>
+    <div class="btn-row"><button class="btn btn-primary" id="quiz-retry">Retry</button></div>`;
+  // bind via addEventListener, not an inline onclick attribute
+  r.querySelector("#quiz-retry").onclick = () => document.getElementById("quiz-start").click();
+  examPaint();
   try {
     const best = JSON.parse(localStorage.getItem("kanji-best") || "{}");
     const key = quiz.scope;
@@ -595,9 +821,12 @@ function compCard(v, partsHTML) {
   d.className = "comp";
   const chars = [...v.word].map(ch => {
     const k = kanjiMap.get(ch);
-    if (k) return `<button class="link" data-ch="${ch}" title="${esc(k.meanings.join(", "))}">${esc(ch)}</button>`;
+    if (k) {
+      const rd = ((k.kunyomi[0] || k.onyomi[0] || "").replace(/\./g, ""));
+      return `<button class="link" data-ch="${esc(ch)}" title="${esc(k.meanings.join(", "))}">${esc(ch)}${rd ? `<i>${esc(rd)}</i>` : ""}</button>`;
+    }
     return `<span class="kana">${esc(ch)}</span>`; // hiragana/katakana inside word, e.g. べ in 食べ物
-  }).join(" + ");
+  }).join("");
   // examples: prefer attached data, else look up full vocab entry (covers curated/custom words)
   const entry = v.examples ? v : findVocabEntry(v.word);
   const examples = (entry && entry.examples) ? entry.examples.slice(0, 3) : [];
@@ -616,12 +845,18 @@ function compCard(v, partsHTML) {
     if (hadBias) READING_MAP.set(v.word, prevBias);
     else READING_MAP.delete(v.word);
   }
-  d.innerHTML = `<span class="badge">${esc(v.level)}</span>
-    <button class="wordlink" title="Show usage examples">${esc(v.word)}</button>
-    <span class="reading">(${esc(v.reading) || "—"})</span> — <b>${esc(v.meanings.join(", "))}</b>
-    <div class="parts">${chars}${partsHTML ? " · " + esc(partsHTML) : ""}</div>
+  d.innerHTML = `<div class="comp-top">
+      <span class="badge">${esc(v.level)}</span>
+      <span class="mini">
+        <button class="mini-eye" title="Show usage examples" aria-label="Show usage examples">${icon("eye",12)}</button>
+      </span>
+    </div>
+    <div><button class="wordlink" title="Show usage examples">${esc(v.word)}</button><span class="reading">${esc(v.reading) || "—"}</span></div>
+    <div class="comp-meaning">${esc(v.meanings.join(", "))}</div>
+    <div class="anat-tag">Compound anatomy</div>
+    <div class="parts">${chars}${partsHTML ? `<span class="sub" style="font-size:11px">· ${esc(partsHTML)}</span>` : ""}</div>
     <div class="examples hidden">
-      <div class="ex-title">📌 Usage (${examples.length || "no"} example${examples.length === 1 ? "" : "s"} — click word to hide)</div>
+      <div class="ex-title">📌 Usage · ${examples.length || "no"} example${examples.length === 1 ? "" : "s"}</div>
       ${exHTML}
     </div>`;
   d.querySelectorAll("button.link").forEach(b => b.onclick = (e) => {
@@ -629,8 +864,11 @@ function compCard(v, partsHTML) {
     showDetail(b.dataset.ch); // popup in place — no tab switch, no reshuffle
   });
   const wBtn = d.querySelector("button.wordlink");
+  const eyeBtn = d.querySelector(".mini-eye");
   const exBox = d.querySelector(".examples");
-  wBtn.onclick = () => exBox.classList.toggle("hidden");
+  const toggleEx = () => exBox.classList.toggle("hidden");
+  wBtn.onclick = toggleEx;
+  if (eyeBtn) eyeBtn.onclick = toggleEx;
   return d;
 }
 
@@ -639,6 +877,59 @@ function renderCurated() {
   box.innerHTML = "";
   shuffle([...CURATED]).forEach(c => box.appendChild(compCard(
     { word: c.word, reading: c.reading, meanings: [c.meaning], level: c.level }, c.parts)));
+}
+
+// "Featured Anatomy" hero: a curated word broken into its parts + a phonics note
+function paintFeatureAnatomy() {
+  const box = document.getElementById("comp-feature-body");
+  if (!box) return;
+  if (!CURATED.length) { box.innerHTML = ""; return; }
+  const c = CURATED[3] || CURATED[0];
+  const chars = [...c.word].map(ch => kanjiMap.get(ch)).filter(Boolean);
+  const pairs = (chars.length ? chars : [{ character: c.word, kunyomi: [c.reading] }]).map((k, i) => {
+    const rd = ((k.kunyomi?.[0] || k.onyomi?.[0] || "").replace(/\./g, ""));
+    return `<span class="pair"><span class="ch">${esc(k.character)}</span>
+      <span class="rd">${esc(rd || (i === 0 ? c.reading : "—"))}</span></span>`;
+  }).join(`<span class="op">+</span>`);
+  document.getElementById("comp-feature-tag").textContent = `${c.level} · ${c.meaning}`;
+  box.innerHTML = `
+    <div class="anat">${pairs}<span class="op">=</span>
+      <span class="res"><span class="ch">${esc(c.word)}</span><span class="rd">${esc(c.reading)}</span></span>
+    </div>
+    <div class="phonic">
+      <span class="ic">${icon("bulb",16)}</span>
+      <div>
+        <b>Phonetic Morph (Semantic → Sound) Effect</b>
+        ${esc(c.parts)} — the same secondary reading じしょく attaches across the pair, so the word reads as
+        “food &amp; drink” rather than two unrelated nouns.
+      </div>
+    </div>`;
+}
+
+// static right-rail formation guide
+function paintCompRules() {
+  const box = document.getElementById("comp-rules");
+  if (!box) return;
+  box.innerHTML = [
+    ["On'yomi + On'yomi · 音＋音", "Most common compounds. Both kanji keep their Sino-Japanese reading — e.g. 鉄 (てつ) + 道 (どう) → 鉄道 (てつどう)."],
+    ["Kun'yomi Voicing · 訓+/ Rinpaku", "Stem changes when a voiced mark follows — te↔de, ki↔gi — e.g. 風 (かぜ) + 鈴 (りん) → 風鈴 (ふうりん)."],
+    ["Oyakusoko &amp; Hyōgai · 親子・表記", "Kanji pairs are used interchangeably in compounds. A written form may appear where the standard spelling keeps hiragana."],
+  ].map(([b, t]) => `<li><b>${b}</b>${t}</li>`).join("");
+}
+
+// quiz right-rail "related lessons"
+function paintRelated() {
+  const box = document.getElementById("quiz-related");
+  if (!box) return;
+  const items = [
+    ["P", "Nature &amp; Foliage Radicals", "N3 Grammar · 08:40"],
+    ["P", "Homophones of 付 (ふ)", "Pronunciation · 08:15"],
+    ["P", "Radical Secrets: Water vs Ice", "N3 Grammar · 06:20"],
+  ];
+  box.innerHTML = items.map(([ic, t, s]) =>
+    `<li><span class="ic">${icon("play",12)}</span>
+      <span class="tx"><b>${t}</b><small>${s}</small></span>
+      <span class="sub">›</span></li>`).join("");
 }
 
 let compPool = []; // shuffled pool for current filter; stable across "Show more"
@@ -666,15 +957,15 @@ function renderCompounds() {
 
 function renderCompoundsFromPool() {
   const list = compPool.length ? compPool : compFilters();
-  document.getElementById("comp-stats").textContent = `${list.length} compounds in scope (random order)`;
+  document.getElementById("comp-stats").textContent = `${list.length.toLocaleString()} compounds in scope · random order`;
   const box = document.getElementById("comp-list");
   box.innerHTML = "";
   list.slice(0, compShown).forEach(v => {
     const parts = [...v.word].map(ch => {
       const k = kanjiMap.get(ch);
-      if (!k) return ch; // kana, e.g. べ
-      return `${ch}(${(k.kunyomi[0]||k.onyomi[0]||"").replace(/\./g,"")} ${k.meanings[0]})`;
-    }).join(" + ");
+      if (!k) return null; // kana, e.g. べ — already rendered as .kana chip
+      return `${ch} ${esc(k.meanings[0])}`;
+    }).filter(Boolean).join(" + ");
     box.appendChild(compCard(v, parts));
   });
   renderCustom();
@@ -721,6 +1012,72 @@ document.getElementById("custom-form").onsubmit = e => {
   e.target.reset();
   renderCustom();
 };
+
+// ---------- Word Lab Drill (compounds right rail) ----------
+let drill = { q: null, score: 0, asked: 0, right: 0, startedAt: 0, timer: null };
+function drillPool() {
+  const levels = [...document.querySelectorAll("#comp-levels input:checked")].map(i => i.value);
+  return quizPoolW(levels.length ? levels : LEVELS, false);
+}
+function drillPaint() {
+  const body = document.getElementById("drill-body");
+  if (!body || !drill.q) return;
+  document.getElementById("drill-score").textContent = drill.score;
+  document.getElementById("drill-sub").textContent = `${drill.right}/${drill.asked} correct`;
+  body.innerHTML = `
+    <div class="dq">${esc(drill.q.prompt)}</div>
+    <p class="sub" style="text-align:center">${esc(drill.q.sub.replace(/\s*\[N\d\].*$/, ""))}</p>
+    <div class="drill-opts"></div>`;
+  const box = body.querySelector(".drill-opts");
+  drill.q.opts.forEach((o) => {
+    const b = document.createElement("button");
+    b.dataset.opt = o;
+    b.innerHTML = `<span>${esc(o)}</span>`;
+    b.onclick = () => {
+      const ok = o === drill.q.answer;
+      drill.asked++;
+      if (ok) { drill.score++; drill.right++; }
+      // match on data-opt, not textContent — readings overlap by prefix
+      // (かわ is a substring of かわき), so text matching picks the wrong button
+      [...box.children].forEach(x => {
+        x.disabled = true;
+        if (x.dataset.opt === drill.q.answer) x.classList.add("correct");
+        else if (x === b) x.classList.add("wrong");
+      });
+      document.getElementById("drill-tag").textContent = ok ? "Correct ✓" : `→ ${drill.q.answer}`;
+      // refresh the score tiles now — don't wait for the next question
+      document.getElementById("drill-score").textContent = drill.score;
+      document.getElementById("drill-sub").textContent = `${drill.right}/${drill.asked} correct`;
+      setTimeout(() => drillNext(), 800);
+    };
+    box.appendChild(b);
+  });
+}
+function drillNext() {
+  const pool = drillPool();
+  if (pool.length < 4) {
+    document.getElementById("drill-body").innerHTML =
+      '<p class="sub">Not enough compound readings in the current level scope — widen the filter above.</p>';
+    document.getElementById("drill-tag").textContent = "Idle";
+    return;
+  }
+  drill.q = buildCompoundReading(pool);
+  drillPaint();
+}
+function startDrill() {
+  const pool = drillPool();
+  if (pool.length < 4) return alert("Widen the compound level scope first — the drill needs at least 4 words.");
+  drill = { q: null, score: 0, asked: 0, right: 0, startedAt: Date.now(), timer: null };
+  document.getElementById("drill-tag").textContent = "Running";
+  clearInterval(drill.timer);
+  drill.timer = setInterval(() => {
+    const s = Math.floor((Date.now() - drill.startedAt) / 1000);
+    document.getElementById("drill-time").textContent =
+      `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`;
+  }, 1000);
+  drillNext();
+}
+document.getElementById("drill-start").onclick = startDrill;
 
 // ---------- daily learning v2: level-based lessons + SRS ----------
 const DAILY_KEY = "kanji-daily-v2";
@@ -891,18 +1248,18 @@ function flashCard(ch, kind) {
   const k = kanjiMap.get(ch);
   if (!k) return document.createTextNode("");
   const d = document.createElement("div");
-  d.className = "card flash";
+  d.className = "card tile flash";
   const ex = VOCAB.filter(v => v.word.includes(ch)).slice(0, 2);
   const st = srsStatus(ch);
   const dot = st === "new" ? '<span class="dot new" title="new today"></span>'
     : st === "due" ? '<span class="dot due" title="review due"></span>' : "";
-  d.innerHTML = `<span class="badge">${k.level}</span>${dot}
+  d.innerHTML = `<div class="tile-top"><span class="badge">${esc(k.level)}</span>${dot}</div>
     <div class="k">${esc(ch)}</div>
-    <button class="small reveal-btn">Reveal</button>
+    <button class="reveal-btn">Reveal</button>
     <div class="hidden-answer">
       <div class="m"><b>${esc(k.meanings.join(", "))}</b></div>
-      <div class="r">オン: ${esc((k.onyomi||[]).join("・")||"—")}<br>くん: ${esc((k.kunyomi||[]).join("・")||"—")}</div>
-      <div class="r">${ex.map(v => `${esc(v.word)} (${esc(v.reading)}) — ${esc(v.meanings.slice(0,2).join(", "))}`).join("<br>")}</div>
+      <div class="r">音 ${esc((k.onyomi||[]).join("・")||"—")}<br>訓 ${esc((k.kunyomi||[]).join("・")||"—")}</div>
+      ${ex.map(v => `<div class="r">${esc(v.word)} (${esc(v.reading)}) — ${esc(v.meanings.slice(0,2).join(", "))}</div>`).join("")}
       <div class="mem"><span>Memory Strength</span><span class="mem-dots">${[0,1,2,3].map(i =>
         `<i class="${((daily.srs[ch]?.reps || 0) + (((daily.days[dayKey()]?.graded || {})[ch]) ? 1 : 0)) > i ? "on" : ""}"></i>`).join("")}</span></div>
       <div class="grade-row">
@@ -924,10 +1281,11 @@ function renderDaily() {
   const today = dayKey();
   const cp = courseProgress();
   const dayNo = Object.keys(daily.days).length;
+  const lv = daily.settings.level;
   document.getElementById("daily-title").textContent =
-    `Today's lesson — ${today} (scope ${studyLevels().join("+")} · course ${cp.done}/${cp.total} · day ${dayNo} · goal ${daily.settings.goal}/day)`;
-  document.getElementById("daily-streak").textContent =
-    `🔥 Streak: ${daily.streak||0} day${(daily.streak||0)===1?"":"s"} · Learned: ${Object.keys(daily.srs).length} kanji · Scope: ${studyLevels().join("+")}`;
+    `Welcome back 👋 — Day ${dayNo} · ${lv}`;
+  document.getElementById("daily-streak").innerHTML =
+    `Keep your <b>${daily.streak||0}-day streak</b> alive with today's ${daily.settings.goal}-card spaced repetition session · course <b>${cp.done}/${cp.total}</b>.`;
   try { paintHdrStreak(); } catch {}
   const graded = daily.days[today]?.graded || {};
   const total = todaySet.newChars.length + todaySet.revChars.length;
@@ -935,24 +1293,26 @@ function renderDaily() {
   const pct = total ? Math.round(done/total*100) : 100;
   document.getElementById("daily-progress").textContent = `${done}/${total} done today (${pct}%)`;
   document.getElementById("daily-bar").style.width = pct + "%";
-  document.getElementById("daily-new-count").textContent = todaySet.newChars.length;
-  document.getElementById("daily-rev-count").textContent = todaySet.revChars.length;
+  document.getElementById("daily-new-count").textContent = `${todaySet.newChars.length} new`;
+  document.getElementById("daily-rev-count").textContent = `${todaySet.revChars.length} due`;
   const nb = document.getElementById("daily-new");
   nb.innerHTML = "";
-  if (!todaySet.newChars.length) nb.innerHTML = "<p class='stats'>No new kanji left in scope — you've seen them all. Raise your level or review! 🎉</p>";
+  if (!todaySet.newChars.length) nb.innerHTML = "<p class='sub'>No new kanji left in scope — you've seen them all. Raise your level or review! 🎉</p>";
   todaySet.newChars.forEach(ch => nb.appendChild(flashCard(ch, "new")));
   const rb = document.getElementById("daily-rev");
   rb.innerHTML = "";
-  if (!todaySet.revChars.length) rb.innerHTML = "<p class='stats'>No reviews due. New cards you grade today return tomorrow.</p>";
-  todaySet.revChars.forEach(ch => rb.appendChild(flashCard(ch, "rev")));
+  if (!todaySet.revChars.length) rb.innerHTML = "<p class='sub'>No reviews due. New cards you grade today return tomorrow.</p>";
+  todaySet.revChars.slice(0, 24).forEach(ch => rb.appendChild(flashCard(ch, "rev")));
   const allDone = total > 0 && done >= total;
   document.getElementById("daily-done").classList.toggle("hidden", !allDone);
   if (allDone) document.getElementById("daily-summary").textContent =
     `Completed ${todaySet.newChars.length} new + ${todaySet.revChars.length} reviews. Come back tomorrow to keep the streak!`;
+  renderDecks();
+  renderRing(pct, done, total);
+  renderWeekStrip();
   // overall per-level progress
   const learned = new Set(Object.keys(daily.srs));
-  document.getElementById("daily-stats").textContent =
-    `Total: ${learned.size}/${KANJI.length} kanji started`;
+  document.getElementById("daily-stats").textContent = `${learned.size} / ${KANJI.length} started`;
   const lvBox = document.getElementById("daily-levels");
   lvBox.innerHTML = "";
   LEVELS.forEach(l => {
@@ -961,9 +1321,71 @@ function renderDaily() {
     const p = tot ? Math.round(n/tot*100) : 0;
     const row = document.createElement("div");
     row.className = "lvl-row";
-    row.innerHTML = `<b style="width:30px">${l}</b><div class="progressbar"><div id="x" style="background:#2a9d8f;height:100%;width:${p}%"></div></div><span>${n}/${tot} (${p}%)</span>`;
+    row.innerHTML = `<span class="lv">${l}</span><div class="progressbar"><div style="background:var(--brand);height:100%;width:${p}%;border-radius:999px"></div></div><span class="count">${n}/${tot} · ${p}%</span>`;
     lvBox.appendChild(row);
   });
+  // library study-log rail mirror
+  const log = document.getElementById("lib-log");
+  if (log) log.innerHTML = `Course <b>${cp.done}/${cp.total}</b> characters graded · <b>${learned.size}</b> in memory · streak <b>${daily.streak||0}</b> day${(daily.streak||0)===1?"":"s"}.`;
+}
+
+const DECK_TONE = ["brand", "amber", "green", "", "brand"];
+const DECK_GLYPH = ["語", "走", "食", "水", "話"];
+function renderDecks() {
+  const box = document.getElementById("daily-decks");
+  if (!box) return;
+  const learned = new Set(Object.keys(daily.srs));
+  const scope = new Set(studyLevels());
+  // always show three decks: the active scope first, then the next levels up
+  const ordered = [...LEVELS.filter(l => scope.has(l)), ...LEVELS.filter(l => !scope.has(l))];
+  const shown = ordered.slice(0, 3);
+  box.innerHTML = shown.map((l, i) => {
+    const pool = KANJI.filter(k => k.level === l);
+    const n = pool.filter(k => learned.has(k.character)).length;
+    const pct = pool.length ? Math.round(n / pool.length * 100) : 0;
+    const due = pool.filter(k => srsStatus(k.character) === "due").length;
+    const label = l === "N5" ? "Core 350 Kanji Characters" : l === "N4" ? "Everyday Verbs" : "Cultural Radicals & Dishes";
+    const col = pct >= 66 ? "green" : pct >= 25 ? "amber" : "brand";
+    return `<div class="deck ${DECK_TONE[i] || col}">
+      <span class="deck-glyph">${DECK_GLYPH[i]}</span>
+      <div class="deck-top"><span class="chip chip-brand">JLPT ${l}</span>${due ? `<span class="chip chip-quiet">${due} due</span>` : ""}</div>
+      <h3>${esc(label)}</h3>
+      <p class="deck-sub">${n} of ${pool.length} characters graded</p>
+      <div class="progressbar"><div style="background:var(--brand);height:100%;width:${pct}%;border-radius:999px"></div></div>
+      <div class="deck-foot"><span>Progress (${n}/${pool.length})</span><span class="pct">${pct}%</span></div>
+    </div>`;
+  }).join("");
+}
+
+function renderRing(pct, done, total) {
+  const ring = document.getElementById("daily-ring");
+  if (!ring) return;
+  ring.style.setProperty("--p", pct);
+  document.getElementById("ring-pct").textContent = pct + "%";
+  document.getElementById("ring-goal").textContent = `Goal ${daily.settings.goal}/day`;
+  const learned = new Set(Object.keys(daily.srs));
+  document.getElementById("ring-stats").innerHTML = `
+    <div class="row"><span>Done today</span><b>${done} / ${total}</b></div>
+    <div class="row"><span>New cards</span><b>${todaySet.newChars.length}</b></div>
+    <div class="row"><span>Reviews due</span><b>${todaySet.revChars.length}</b></div>
+    <div class="row"><span>New Kanji</span><b>${learned.size}</b></div>
+    <div class="row"><span>Streak</span><b>${daily.streak||0} days</b></div>`;
+}
+
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+function renderWeekStrip() {
+  const box = document.getElementById("week-strip");
+  if (!box) return;
+  const today = dayKey();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push({ key: dayKey(d), letter: DAY_LETTERS[d.getDay()], today: i === 0 });
+  }
+  box.innerHTML = days.map(d =>
+    `<span class="day${d.today ? " today" : ""}"><i class="${daily.days[d.key] ? "on" : ""}">${daily.days[d.key] ? "✓" : ""}</i><span>${d.letter}</span></span>`
+  ).join("");
 }
 
 function dailyScopeSignature() {
@@ -1015,7 +1437,7 @@ function initDaily() {
     renderDaily();
     sessReset();
     sessLearn();
-    document.getElementById("sess-box").scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollTo(document.getElementById("sess-box"), { behavior: "smooth", block: "center" });
   };
   document.getElementById("daily-only").onclick = () => setScope([daily.settings.level]);
   document.getElementById("daily-below").onclick = () => {
@@ -1036,15 +1458,14 @@ function initDaily() {
     try { renderLibrary(); } catch {}
   };
   document.getElementById("sess-learn").onclick = () => { buildTodaySet(); renderDaily(); sessLearn(); };
-  document.getElementById("sess-quiz").onclick = () => { buildTodaySet(); renderDaily(); sessQuiz(); };
+  document.getElementById("sess-next-2").onclick = () => {
+    if (sess.phase !== "learn" || !todaySet.newChars.length) return;
+    sess.learnIdx = (sess.learnIdx + 1) % todaySet.newChars.length;
+    renderSess();
+  };
   document.getElementById("sess-prev").onclick = () => {
     if (sess.phase !== "learn" || !todaySet.newChars.length) return;
     sess.learnIdx = (sess.learnIdx - 1 + todaySet.newChars.length) % todaySet.newChars.length;
-    renderSess();
-  };
-  document.getElementById("sess-next").onclick = () => {
-    if (sess.phase !== "learn" || !todaySet.newChars.length) return;
-    sess.learnIdx = (sess.learnIdx + 1) % todaySet.newChars.length;
     renderSess();
   };
   document.getElementById("daily-export").onclick = () => {
@@ -1090,7 +1511,7 @@ function initDaily() {
   restoreSess();
 }
 
-// ---------- guided daily session: Learn -> typing Quiz ----------
+// ---------- guided daily session: Learn -> reveal ----------
 let sess = { phase: "idle", learnIdx: 0, viewed: new Set(), quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null, perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
 
 function sessReset() {
@@ -1115,14 +1536,10 @@ function saveSess() {
 function restoreSess() {
   try {
     const s = daily.days[dayKey()]?.sess;
-    if (s && (s.phase === "learn" || s.phase === "quiz")) {
-      const pool = (s.quizPool || []).filter(ch => kanjiMap.has(ch));
-      sess = { phase: s.phase, learnIdx: s.learnIdx || 0, viewed: new Set(s.viewed || []),
-        quizPool: pool, quizIdx: Math.min(s.quizIdx || 0, pool.length),
-        checked: !!s.checked, typed: s.typed || "", meaningOk: s.meaningOk ?? null,
-        perfect: s.perfect || 0, partial: s.partial || 0, miss: s.miss || 0,
-        misses: (s.misses || []).filter(ch => kanjiMap.has(ch)), round: s.round || 1 };
-      if (sess.phase === "quiz" && !sess.quizPool.length) sess.phase = "idle";
+    if (s && s.phase === "learn") {
+      sess = { phase: "learn", learnIdx: s.learnIdx || 0, viewed: new Set(s.viewed || []),
+        quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null,
+        perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
     } else {
       sess = { phase: "idle", learnIdx: 0, viewed: new Set(), quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null, perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
     }
@@ -1130,32 +1547,6 @@ function restoreSess() {
     sess = { phase: "idle", learnIdx: 0, viewed: new Set(), quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null, perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
   }
   try { renderSess(); } catch {}
-}
-
-function normStr(s) {
-  return String(s||"").toLowerCase().trim().replace(/[.,/#!$%^&*;:{}=\-_'\"()[\]<>?]/g, "").replace(/\s+/g, " ");
-}
-
-function meaningHit(k, typed) {
-  const t = normStr(typed);
-  if (!t) return false;
-  const ms = k.meanings.map(normStr).filter(Boolean);
-  if (ms.includes(t)) return true;
-  if (t.length >= 3 && ms.some(m => m.includes(t))) return true;
-  if (ms.some(m => m.length >= 4 && t.includes(m))) return true;
-  return false;
-}
-
-// decoy placeholder for the typing box: a real meaning from another kanji that
-// would NOT count as correct for this card (verified with meaningHit)
-function sessDecoyMeaning(k, ch) {
-  const pool = studyPool().filter(x => x.character !== ch);
-  for (let t = 0; t < 25 && pool.length; t++) {
-    const cand = pool[Math.floor(Math.random() * pool.length)];
-    const m0 = (cand.meanings[0] || "").trim();
-    if (m0 && !meaningHit(k, m0)) return m0;
-  }
-  return "";
 }
 
 function sessLearn() {
@@ -1168,45 +1559,15 @@ function sessLearn() {
   renderSess();
 }
 
-function sessQuiz() {
-  const pool = shuffle([...todaySet.newChars, ...todaySet.revChars]);
-  if (!pool.length) {
-    document.getElementById("sess-status").textContent = "No cards to quiz — nothing new or due. 🎉";
-    return;
-  }
-  sess.phase = "quiz";
-  sess.quizPool = pool;
-  sess.quizIdx = 0;
-  sess.checked = false;
-  sess.meaningOk = null;
-  sess.perfect = 0; sess.partial = 0; sess.miss = 0;
-  sess.misses = [];
-  sess.round = 1;
-  renderSess();
-}
-
-function sessRetry() {
-  if (!sess.misses.length) return;
-  sess.quizPool = shuffle([...sess.misses]);
-  sess.quizIdx = 0;
-  sess.checked = false;
-  sess.meaningOk = null;
-  sess.perfect = 0; sess.partial = 0; sess.miss = 0;
-  sess.misses = [];
-  sess.round += 1;
-  sess.phase = "quiz";
-  renderSess();
-}
-
 function sessCardHTML(ch, showAnswer) {
   const k = kanjiMap.get(ch);
   const ex = VOCAB.filter(v => v.word.includes(ch)).slice(0, 2);
-  return `<span class="badge">${k.level}</span>
+  return `<div class="tile-top" style="position:static;display:flex;justify-content:center;margin-bottom:4px"><span class="badge">${esc(k.level)}</span></div>
     <div class="sess-card-big">${esc(ch)}</div>
     ${showAnswer ? `<div class="sess-meaning"><b>${esc(k.meanings.join(", "))}</b></div>
-    <div class="sess-reading">オン: ${esc((k.onyomi||[]).join("・")||"—")} · くん: ${esc((k.kunyomi||[]).join("・")||"—")}</div>
+    <div class="sess-reading">音 ${esc((k.onyomi||[]).join("・")||"—")} · 訓 ${esc((k.kunyomi||[]).join("・")||"—")} · ${k.strokes ?? "—"} strokes</div>
     <div class="sess-examples"><b>Usage</b><ul>${ex.map(v => `<li>${esc(v.word)} (${esc(v.reading)}) — ${esc(v.meanings.slice(0,2).join(", "))}</li>`).join("") || "<li>—</li>"}</ul></div>`
-    : `<div class="sess-meaning" style="color:#888">Try to recall the meaning + reading, then Reveal.</div>`}`;
+    : `<div class="sess-meaning"><span style="color:var(--muted);font-weight:500">Try to recall the meaning + reading, then Reveal.</span></div>`}`;
 }
 
 function renderSess() {
@@ -1215,94 +1576,25 @@ function renderSess() {
   if (!box || !KANJI.length) return;
   saveSess();
   if (sess.phase === "idle") {
-    status.textContent = `Press Learn to walk through ${todaySet.newChars.length} new kanji one by one, then Quiz yourself by typing (${todaySet.newChars.length + todaySet.revChars.length} cards: new + reviews).`;
+    status.textContent = `Press Learn to walk through ${todaySet.newChars.length} new kanji one by one. Quiz yourself in the Test tab.`;
     box.innerHTML = "";
     return;
   }
   if (sess.phase === "learn") {
     const list = todaySet.newChars;
-    if (!list.length) { status.textContent = "No new kanji today — skip to Quiz for reviews."; box.innerHTML = ""; return; }
+    if (!list.length) { status.textContent = "No new kanji today — review in the Test tab."; box.innerHTML = ""; return; }
     sess.learnIdx = Math.min(Math.max(0, sess.learnIdx), list.length - 1);
     const ch = list[sess.learnIdx];
     const revealed = sess.viewed.has(ch + "@" + sess.learnIdx) || sess.viewed.has(ch);
-    status.textContent = `Learn ${sess.learnIdx + 1}/${list.length} · revealed ${[...sess.viewed].filter(x => list.includes(x)).length}/${list.length} — recall, then Reveal.`;
+    status.textContent = `Learn ${sess.learnIdx + 1}/${list.length} · recalled ${[...sess.viewed].filter(x => list.includes(x)).length}/${list.length}.`;
     box.innerHTML = `${sessCardHTML(ch, revealed)}
-      <div class="controls"><button id="sess-reveal">${revealed ? "Hide" : "Reveal"}</button>
-      <button id="sess-tq" class="small">Start typing quiz →</button></div>`;
+      <div class="controls"><button id="sess-reveal">${revealed ? "Hide" : "Reveal answer"}</button></div>`;
     document.getElementById("sess-reveal").onclick = () => {
       if (sess.viewed.has(ch)) sess.viewed.delete(ch); else sess.viewed.add(ch);
       renderSess();
     };
-    document.getElementById("sess-tq").onclick = sessQuiz;
     return;
   }
-  if (sess.phase === "quiz") {
-    const total = sess.quizPool.length;
-    if (sess.quizIdx >= total) return renderSessDone();
-    const ch = sess.quizPool[sess.quizIdx];
-    const k = kanjiMap.get(ch);
-    status.textContent = `Quiz round ${sess.round} · ${sess.quizIdx + 1}/${total} · ✅${sess.perfect} △${sess.partial} ❌${sess.miss}`;
-    if (!sess.checked) {
-      const decoy = sessDecoyMeaning(k, ch);
-      box.innerHTML = `<span class="badge">${k.level}</span>
-        <div class="sess-card-big">${esc(ch)}</div>
-        <div class="sess-meaning">Type the <b>meaning</b> in English, then Check (Enter ↵).</div>
-        <div class="sess-type"><input id="sess-in" placeholder="${decoy ? `e.g. ${esc(decoy)}` : "Type the meaning…"}" autocomplete="off" />
-        <button id="sess-check">Check</button></div>`;
-      const inp = document.getElementById("sess-in");
-      inp.focus();
-      const check = () => {
-        sess.typed = inp.value;
-        sess.meaningOk = meaningHit(k, inp.value);
-        sess.checked = true;
-        renderSess();
-      };
-      document.getElementById("sess-check").onclick = check;
-      inp.onkeydown = (e) => { if (e.key === "Enter") check(); };
-    } else {
-      const ok = sess.meaningOk;
-      box.innerHTML = `<span class="badge">${k.level}</span>
-        <div class="sess-card-big">${esc(ch)}</div>
-        <div class="sess-meaning">You typed: <b>"${esc(sess.typed) || "(blank)"}"</b> —
-          <span class="${ok ? "sess-hit" : "sess-miss"}">${ok ? "✅ meaning correct" : "❌ not quite"}</span></div>
-        ${sessCardHTML(ch, true)}
-        <div class="sess-meaning">Honest check: did you also know the <b>reading</b>?</div>
-        <div class="sess-outcome">
-          <button data-o="miss" class="${!ok ? "suggested" : ""}">❌ Missed</button>
-          <button data-o="partial" class="${ok ? "suggested" : ""}">△ Partial</button>
-          <button data-o="perfect">✅ Perfect</button>
-        </div>`;
-      box.querySelectorAll(".sess-outcome button").forEach(b => b.onclick = () => {
-        const o = b.dataset.o;
-        if (o === "miss") { sess.miss++; sess.misses.push(ch); gradeKanji(ch, "again"); }
-        else if (o === "partial") { sess.partial++; gradeKanji(ch, "good"); }
-        else { sess.perfect++; gradeKanji(ch, "easy"); }
-        sess.quizIdx++;
-        sess.checked = false;
-        sess.meaningOk = null;
-        renderSess();
-      });
-    }
-    return;
-  }
-}
-
-function renderSessDone() {
-  sess.phase = "done";
-  const box = document.getElementById("sess-card");
-  const status = document.getElementById("sess-status");
-  const total = sess.perfect + sess.partial + sess.miss;
-  status.textContent = `Round ${sess.round} done: ✅${sess.perfect} △${sess.partial} ❌${sess.miss}`;
-  box.innerHTML = `<div class="sess-meaning"><b>Round complete — お疲れ様！</b></div>
-    ${sess.misses.length ? `<div class="sess-examples"><b>Misses (${sess.misses.length})</b><ul>${
-      sess.misses.map(ch => { const kk = kanjiMap.get(ch); return `<li>${esc(ch)} — ${esc(kk ? kk.meanings.join(", ") : "")}</li>`; }).join("")
-    }</ul></div>
-    <div class="controls"><button id="sess-retry">Retry misses (${sess.misses.length})</button></div>`
-    : `<div class="sess-meaning sess-hit"><b>Flawless — nothing missed. 🎉</b></div>`}
-    <div class="controls"><button id="sess-back" class="small">← Back to Learn</button></div>`;
-  const rt = document.getElementById("sess-retry");
-  if (rt) rt.onclick = sessRetry;
-  document.getElementById("sess-back").onclick = () => { sess.phase = "learn"; sess.learnIdx = 0; renderSess(); };
 }
 
 // ---------- header: global search, streak pill, shortcuts ----------
@@ -1325,21 +1617,24 @@ function paintHdrStreak() {
   if (el) el.textContent = `🔥 ${daily.streak || 0} days`;
   const lv = document.getElementById("hdr-level");
   if (lv) lv.textContent = daily.settings.level;
+  const xp = document.getElementById("hdr-xp");
+  if (xp) {
+    const learned = Object.keys(daily.srs).length;
+    const reviewed = Object.values(daily.srs).reduce((a, e) => a + (e.reps || 0), 0);
+    xp.textContent = `◈ ${(learned * 50 + reviewed * 10).toLocaleString()} XP`;
+  }
 }
 document.getElementById("hdr-search").addEventListener("keydown", (e) => {
   if (e.key === "Enter") submitHdrSearch();
   else if (e.key === "Escape") e.target.blur();
 });
-document.getElementById("theme-btn").onclick = () => {
-  const dark = !document.documentElement.classList.contains("dark");
-  document.documentElement.classList.toggle("dark", dark);
-  try { localStorage.setItem("kanji-theme", dark ? "dark" : "light"); } catch {}
-  paintTheme();
-};
+document.getElementById("theme-btn").onclick = toggleTheme;
 function paintTheme() {
   const dark = document.documentElement.classList.contains("dark");
   const b = document.getElementById("theme-btn");
   if (b) b.textContent = dark ? "☀️" : "🌙";
+  const lbl = document.getElementById("side-theme-label");
+  if (lbl) lbl.textContent = dark ? "Light mode" : "Dark mode";
 }
 paintTheme();
 document.addEventListener("keydown", (e) => {
@@ -1347,17 +1642,31 @@ document.addEventListener("keydown", (e) => {
   const typing = tag === "input" || tag === "textarea" || tag === "select";
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); focusHdrSearch(); return; }
   if (e.key === "/" && !typing) { e.preventDefault(); focusHdrSearch(); return; }
+  if (e.key === "Escape") {
+    ["kanji-detail", "help-modal"].forEach(id => document.getElementById(id)?.classList.add("hidden"));
+    closeNav();
+    if (typing) document.activeElement.blur();
+    return;
+  }
   if (typing) return;
   const playVisible = !document.getElementById("quiz-play").classList.contains("hidden");
   const quizActive = document.getElementById("tab-quiz").classList.contains("active") && playVisible;
-  if (!quizActive) return;
+  if (quizActive) {
+    if (["1", "2", "3", "4"].includes(e.key)) {
+      const btns = [...document.querySelectorAll("#quiz-opts button")].filter(b => !b.disabled);
+      const b = btns[parseInt(e.key, 10) - 1];
+      if (b) b.click();
+    } else if (e.key === "Enter") {
+      const nx = document.getElementById("quiz-next");
+      if (!nx.classList.contains("hidden")) nx.click();
+    }
+    return;
+  }
+  // secondary nav: 1-4 switch tabs when no quiz is running
   if (["1", "2", "3", "4"].includes(e.key)) {
-    const btns = [...document.querySelectorAll("#quiz-opts button")].filter(b => !b.disabled);
-    const b = btns[parseInt(e.key, 10) - 1];
+    const tabs = ["daily", "library", "quiz", "compounds"];
+    const b = document.querySelector(`[data-tab='${tabs[parseInt(e.key,10)-1]}']`);
     if (b) b.click();
-  } else if (e.key === "Enter") {
-    const nx = document.getElementById("quiz-next");
-    if (!nx.classList.contains("hidden")) nx.click();
   }
 });
 
@@ -1365,6 +1674,7 @@ document.addEventListener("keydown", (e) => {
 // Local-first: everything still works offline in localStorage. When logged in,
 // changes push (debounced) and the other device merges them in on next pull.
 const SUPA_CFG_KEY = "kanji-supa-cfg";
+const SUPA_ENABLED = false; // cloud sync disabled for now — flip to true to re-enable
 let supa = null, supaReady = null, supaUser = null;
 let syncDirty = false, syncTimer = null, lastPullAt = 0;
 
@@ -1414,7 +1724,7 @@ async function pushCloud(force = false) {
       clientUpdatedAt: daily.clientUpdatedAt };
     const { error } = await client.from("progress").upsert(
       { user_id: supaUser.id, data: doc, updated_at: new Date().toISOString() },
-      { onConflict: "user_id" });
+      { on_conflict: "user_id" });
     if (error) throw error;
     syncDirty = false;
     setSyncStatus("ready");
@@ -1428,9 +1738,8 @@ async function pullCloud() {
   if (!client || !supaUser) return false;
   setSyncStatus("syncing");
   try {
-    const { data, error } = await client.from("progress")
+    const { data } = await client.from("progress")
       .select("data,updated_at").eq("user_id", supaUser.id).maybeSingle();
-    if (error) throw error;
     lastPullAt = Date.now();
     if (data?.data?.daily) mergeCloudDoc(data.data);
     else await pushCloud(true); // first device: upload local progress
@@ -1498,7 +1807,6 @@ function mergeCloudDoc(doc) {
     try { renderLibrary(); renderBest(); renderCompounds(); } catch {}
   } catch {}
 }
-
 function paintAcct() {
   const email = supaUser?.email || "";
   const msg = document.getElementById("acct-msg");
@@ -1510,7 +1818,9 @@ function paintAcct() {
 }
 function openAcct() {
   const cfg = getSupaCfg();
-  document.getElementById("supa-url").value = cfg.url || "";
+  const u = document.getElementById("supa-url");
+  if (!u) return;
+  u.value = cfg.url || "";
   document.getElementById("supa-key").value = cfg.key || "";
   document.getElementById("acct-msg").textContent = "";
   paintAcct();
@@ -1518,6 +1828,7 @@ function openAcct() {
 }
 
 async function supaInit() {
+  if (!SUPA_ENABLED) return; // disabled — everything stays local-only
   let client = null;
   try { client = await supaClient(); } catch { client = null; }
   if (!client) { setSyncStatus("local"); paintAcct(); return; }
@@ -1565,8 +1876,14 @@ async function acctAuth(mode) {
   } catch (e) { msg("Error: " + (e.message || e)); setSyncStatus("error"); }
 }
 
+document.getElementById("hdr-level").onclick = () => {
+  document.querySelector("[data-tab='daily']").click();
+  scrollTo(document.getElementById("sess-box"), { behavior: "smooth", block: "center" });
+};
+// Supabase cloud sync is DISABLED for now (flip SUPA_ENABLED to re-enable).
+// The whole block below no-ops while the account UI is absent from the page.
+if (document.getElementById("acct-btn")) {
 document.getElementById("acct-btn").onclick = openAcct;
-document.getElementById("hdr-level").onclick = openAcct;
 document.getElementById("acct-close").onclick = () =>
   document.getElementById("acct-modal").classList.add("hidden");
 document.getElementById("supa-save").onclick = async () => {
@@ -1594,12 +1911,15 @@ document.getElementById("sync-now").onclick = async () => {
   await pushCloud(true);
   try { renderDaily(); } catch {}
 };
+} // end Supabase-disabled guard
 setInterval(() => { if (syncDirty && supaUser) pushCloud(); }, 120000);
 document.addEventListener("online", () => { if (supaUser) pullCloud(); });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && supaUser && Date.now() - lastPullAt > 5 * 60 * 1000) pullCloud();
 });
 
+paintIcons();
 loadData().catch(err => {
-  document.getElementById("lib-stats").textContent = "Failed to load data. Run via a local server (python -m http.server), not file://. " + err;
+  document.getElementById("lib-stats").textContent =
+    "Failed to load data. Run via a local server (python -m http.server), not file://. " + err;
 });
