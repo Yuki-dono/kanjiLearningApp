@@ -35,8 +35,10 @@ const ICONS = {
   check: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M9 3.2V5M15 3.2V5"/><path d="M8.5 13l2.5 2.5 4.5-5.5"/>',
   layers:'<path d="M12 3l8.5 4.5L12 12 3.5 7.5z"/><path d="M3.5 12.5L12 17l8.5-4.5"/><path d="M3.5 17L12 21.5 20.5 17"/>',
   kbd:   '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9.5h.01M10 9.5h.01M14 9.5h.01M18 9.5h.01M8 15h8"/>',
+  user:  '<path d="M20 21v-1.8a4.2 4.2 0 0 0-4.2-4.2H8.2A4.2 4.2 0 0 0 4 19.2V21"/><circle cx="12" cy="7.5" r="3.7"/>',
   moon:  '<path d="M20.5 14.5A8.5 8.5 0 019.5 3.5a8.5 8.5 0 1011 11z"/>',
   menu:  '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  x:     '<path d="M6 6l12 12M18 6L6 18"/>',
   search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>',
   bulb:  '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 00-3.5 10.9c.5.4.8 1 .8 1.6v.5h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0012 3z"/>',
   play:  '<path d="M7 4.5l12 7.5-12 7.5z"/>',
@@ -62,7 +64,7 @@ document.querySelectorAll(".tabs button").forEach(btn => {
     document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
-    document.getElementById("app").classList.remove("nav-open");
+    closeNav();
     // reshuffle compounds every time the tab is opened
     if (btn.dataset.tab === "compounds" && KANJI.length) {
       shuffleCompounds();
@@ -71,12 +73,29 @@ document.querySelectorAll(".tabs button").forEach(btn => {
 });
 
 // ---------- sidebar (mobile drawer + prefs) ----------
-function closeNav() { document.getElementById("app").classList.remove("nav-open"); }
-document.getElementById("menu-btn").onclick = () => document.getElementById("app").classList.toggle("nav-open");
+const NAV_MQ = window.matchMedia("(max-width: 900px)");
+const navBtn = document.getElementById("menu-btn");
+
+function setNav(open) {
+  const app = document.getElementById("app");
+  const on = open && NAV_MQ.matches;
+  app.classList.toggle("nav-open", on);
+  navBtn.setAttribute("aria-expanded", String(on));
+  // stop the page behind the drawer from scrolling while it's open
+  document.documentElement.classList.toggle("nav-locked", on);
+  if (on) document.getElementById("side-close").focus();
+  else if (document.activeElement && app.contains(document.activeElement)) navBtn.focus();
+}
+function closeNav() { setNav(false); }
+
+navBtn.onclick = () => setNav(!document.getElementById("app").classList.contains("nav-open"));
+document.getElementById("side-close").onclick = closeNav;
 document.getElementById("nav-scrim").onclick = closeNav;
+// rotating / resizing past the drawer breakpoint must not leave it stuck open
+NAV_MQ.addEventListener("change", () => setNav(false));
 document.getElementById("side-shortcuts").onclick = () => {
-  document.getElementById("help-modal").classList.remove("hidden");
   closeNav();
+  document.getElementById("help-modal").classList.remove("hidden");
 };
 document.getElementById("help-close").onclick = () =>
   document.getElementById("help-modal").classList.add("hidden");
@@ -723,6 +742,7 @@ function showResult() {
     if (!best[key] || pct > parseInt(best[key])) { best[key] = pct + "%"; localStorage.setItem("kanji-best", JSON.stringify(best)); }
     renderBest();
   } catch {}
+  queueQuizResult();
 }
 
 // ---------- compounds ----------
@@ -1009,6 +1029,7 @@ document.getElementById("custom-form").onsubmit = e => {
   try { arr = JSON.parse(localStorage.getItem("kanji-custom") || "[]"); } catch {}
   arr.push(c);
   localStorage.setItem("kanji-custom", JSON.stringify(arr));
+  markDirtyCustom();
   e.target.reset();
   renderCustom();
 };
@@ -1101,10 +1122,11 @@ function loadDailyStore() {
   } catch {}
   return { settings: { level: "N4", goal: 5, scope: ["N5", "N4"] }, srs: {}, days: {}, streak: 0, lastActive: null };
 }
-function saveDailyStore() {
+function saveDailyStore(changedChar) {
   stampDaily();
   writeDailyStore();
-  markDirty();
+  // today's row always changed (queue/graded); flag the card too when known
+  markDirty(changedChar, dayKey());
 }
 function writeDailyStore() {
   try { localStorage.setItem(DAILY_KEY, JSON.stringify(daily)); } catch {}
@@ -1220,7 +1242,7 @@ function gradeKanji(ch, grade) {
     daily.streak = daily.lastActive === addDays(today, -1) ? (daily.streak||0) + 1 : 1;
     daily.lastActive = today;
   }
-  saveDailyStore();
+  saveDailyStore(ch);
   buildTodaySet();
   renderDaily();
   try { renderLibrary(); } catch {}
@@ -1241,7 +1263,7 @@ function srsQuizTouch(ch, correct) {
     e.due = addDays(today, e.interval);
   }
   if (!daily.days[today]) daily.days[today] = { newChars: [], graded: {} };
-  saveDailyStore();
+  saveDailyStore(ch);
 }
 
 function flashCard(ch, kind) {
@@ -1413,10 +1435,10 @@ function initDaily() {
     daily.settings.scope = [...new Set(scope.filter(l => LEVELS.includes(l)))];
     if (!daily.settings.scope.length) daily.settings.scope = [daily.settings.level];
     paintScope();
+    markDirtySettings();
     saveDailyStore();
     buildTodaySet();
     renderDaily();
-    sessReset();
   };
   lvSel.onchange = () => {
     daily.settings.level = lvSel.value;
@@ -1427,17 +1449,10 @@ function initDaily() {
   goalIn.onchange = () => {
     daily.settings.goal = Math.min(20, Math.max(3, parseInt(goalIn.value, 10) || 5));
     goalIn.value = daily.settings.goal;
+    markDirtySettings();
     saveDailyStore();
     buildTodaySet();
     renderDaily();
-    sessReset();
-  };
-  document.getElementById("daily-start").onclick = () => {
-    buildTodaySet();
-    renderDaily();
-    sessReset();
-    sessLearn();
-    scrollTo(document.getElementById("sess-box"), { behavior: "smooth", block: "center" });
   };
   document.getElementById("daily-only").onclick = () => setScope([daily.settings.level]);
   document.getElementById("daily-below").onclick = () => {
@@ -1447,26 +1462,17 @@ function initDaily() {
   scopeBoxes.forEach(b => b.onchange = () => {
     setScope(scopeBoxes.filter(x => x.checked).map(x => x.value));
   });
-  document.getElementById("daily-reset").onclick = () => {
-    if (!confirm("Reset all daily progress + SRS memory on this PC?")) return;
+  document.getElementById("daily-reset").onclick = async () => {
+    const cloud = supaUser ? "\n\nThis also erases the copy stored in your account on every device." : "";
+    if (!confirm("Reset all daily progress + SRS memory on this device?" + cloud)) return;
     daily = { settings: { level: lvSel.value, goal: parseInt(goalIn.value, 10) || 5, scope: [lvSel.value] }, srs: {}, days: {}, streak: 0, lastActive: null };
     paintScope();
+    markDirtyAll();
     saveDailyStore();
+    await wipeCloud();
     buildTodaySet();
     renderDaily();
-    sessReset();
     try { renderLibrary(); } catch {}
-  };
-  document.getElementById("sess-learn").onclick = () => { buildTodaySet(); renderDaily(); sessLearn(); };
-  document.getElementById("sess-next-2").onclick = () => {
-    if (sess.phase !== "learn" || !todaySet.newChars.length) return;
-    sess.learnIdx = (sess.learnIdx + 1) % todaySet.newChars.length;
-    renderSess();
-  };
-  document.getElementById("sess-prev").onclick = () => {
-    if (sess.phase !== "learn" || !todaySet.newChars.length) return;
-    sess.learnIdx = (sess.learnIdx - 1 + todaySet.newChars.length) % todaySet.newChars.length;
-    renderSess();
   };
   document.getElementById("daily-export").onclick = () => {
     const data = { app: "kanji-practice", v: 1, exported: dayKey(),
@@ -1492,13 +1498,13 @@ function initDaily() {
         daily = data.daily;
         if (data.best) localStorage.setItem("kanji-best", JSON.stringify(data.best));
         if (data.custom) localStorage.setItem("kanji-custom", JSON.stringify(data.custom));
+        markDirtyAll();
         saveDailyStore();
         lvSel.value = daily.settings.level;
         goalIn.value = daily.settings.goal;
         paintScope();
         buildTodaySet();
         renderDaily();
-        restoreSess();
         try { renderLibrary(); renderBest(); renderCompounds(); } catch {}
         alert("Progress imported ✅");
       } catch { alert("Couldn't import that file — is it a kanji-progress export?"); }
@@ -1508,93 +1514,6 @@ function initDaily() {
   };
   buildTodaySet();
   renderDaily();
-  restoreSess();
-}
-
-// ---------- guided daily session: Learn -> reveal ----------
-let sess = { phase: "idle", learnIdx: 0, viewed: new Set(), quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null, perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
-
-function sessReset() {
-  sess = { phase: "idle", learnIdx: 0, viewed: new Set(), quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null, perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
-  try { renderSess(); } catch {}
-}
-
-// persist guided-session state on every render, so a reload resumes
-// mid-lesson (same card, same quiz position) instead of restarting at 0
-function saveSess() {
-  try {
-    const today = dayKey();
-    if (!daily.days[today]) daily.days[today] = { newChars: [], graded: {} };
-    daily.days[today].sess = { phase: sess.phase, learnIdx: sess.learnIdx,
-      viewed: [...sess.viewed], quizPool: sess.quizPool, quizIdx: sess.quizIdx,
-      checked: sess.checked, typed: sess.typed, meaningOk: sess.meaningOk,
-      perfect: sess.perfect, partial: sess.partial, miss: sess.miss,
-      misses: sess.misses, round: sess.round };
-    saveDailyStore();
-  } catch {}
-}
-function restoreSess() {
-  try {
-    const s = daily.days[dayKey()]?.sess;
-    if (s && s.phase === "learn") {
-      sess = { phase: "learn", learnIdx: s.learnIdx || 0, viewed: new Set(s.viewed || []),
-        quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null,
-        perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
-    } else {
-      sess = { phase: "idle", learnIdx: 0, viewed: new Set(), quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null, perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
-    }
-  } catch {
-    sess = { phase: "idle", learnIdx: 0, viewed: new Set(), quizPool: [], quizIdx: 0, checked: false, typed: "", meaningOk: null, perfect: 0, partial: 0, miss: 0, misses: [], round: 1 };
-  }
-  try { renderSess(); } catch {}
-}
-
-function sessLearn() {
-  if (!todaySet.newChars.length && !todaySet.revChars.length) {
-    document.getElementById("sess-status").textContent = "Nothing to learn today — scope is empty or all done. Adjust scope above.";
-    return;
-  }
-  sess.phase = "learn";
-  sess.learnIdx = 0;
-  renderSess();
-}
-
-function sessCardHTML(ch, showAnswer) {
-  const k = kanjiMap.get(ch);
-  const ex = VOCAB.filter(v => v.word.includes(ch)).slice(0, 2);
-  return `<div class="tile-top" style="position:static;display:flex;justify-content:center;margin-bottom:4px"><span class="badge">${esc(k.level)}</span></div>
-    <div class="sess-card-big">${esc(ch)}</div>
-    ${showAnswer ? `<div class="sess-meaning"><b>${esc(k.meanings.join(", "))}</b></div>
-    <div class="sess-reading">音 ${esc((k.onyomi||[]).join("・")||"—")} · 訓 ${esc((k.kunyomi||[]).join("・")||"—")} · ${k.strokes ?? "—"} strokes</div>
-    <div class="sess-examples"><b>Usage</b><ul>${ex.map(v => `<li>${esc(v.word)} (${esc(v.reading)}) — ${esc(v.meanings.slice(0,2).join(", "))}</li>`).join("") || "<li>—</li>"}</ul></div>`
-    : `<div class="sess-meaning"><span style="color:var(--muted);font-weight:500">Try to recall the meaning + reading, then Reveal.</span></div>`}`;
-}
-
-function renderSess() {
-  const box = document.getElementById("sess-card");
-  const status = document.getElementById("sess-status");
-  if (!box || !KANJI.length) return;
-  saveSess();
-  if (sess.phase === "idle") {
-    status.textContent = `Press Learn to walk through ${todaySet.newChars.length} new kanji one by one. Quiz yourself in the Test tab.`;
-    box.innerHTML = "";
-    return;
-  }
-  if (sess.phase === "learn") {
-    const list = todaySet.newChars;
-    if (!list.length) { status.textContent = "No new kanji today — review in the Test tab."; box.innerHTML = ""; return; }
-    sess.learnIdx = Math.min(Math.max(0, sess.learnIdx), list.length - 1);
-    const ch = list[sess.learnIdx];
-    const revealed = sess.viewed.has(ch + "@" + sess.learnIdx) || sess.viewed.has(ch);
-    status.textContent = `Learn ${sess.learnIdx + 1}/${list.length} · recalled ${[...sess.viewed].filter(x => list.includes(x)).length}/${list.length}.`;
-    box.innerHTML = `${sessCardHTML(ch, revealed)}
-      <div class="controls"><button id="sess-reveal">${revealed ? "Hide" : "Reveal answer"}</button></div>`;
-    document.getElementById("sess-reveal").onclick = () => {
-      if (sess.viewed.has(ch)) sess.viewed.delete(ch); else sess.viewed.add(ch);
-      renderSess();
-    };
-    return;
-  }
 }
 
 // ---------- header: global search, streak pill, shortcuts ----------
@@ -1670,253 +1589,563 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// ---------- cloud sync (Supabase): shared progress across PC + phone ----------
-// Local-first: everything still works offline in localStorage. When logged in,
-// changes push (debounced) and the other device merges them in on next pull.
-const SUPA_CFG_KEY = "kanji-supa-cfg";
-const SUPA_ENABLED = false; // cloud sync disabled for now — flip to true to re-enable
-let supa = null, supaReady = null, supaUser = null;
-let syncDirty = false, syncTimer = null, lastPullAt = 0;
+// ============================================================================
+//  ACCOUNT + CLOUD SYNC (Supabase)
+//
+//  Local-first. Everything keeps working offline in localStorage; when an
+//  account is connected the same data is mirrored to Supabase and merged back
+//  on every visit, so progress follows the user between devices.
+//
+//  Tables (see supabase-schema.sql): profiles · study_settings · srs_cards
+//  · study_days · quiz_scores · custom_words — all locked to auth.uid() by RLS.
+// ============================================================================
+const SUPA_URL = "https://qkcquwbmmqgbvximphbz.supabase.co";
+// The anon key is a *public* client key — it identifies the project, it does not
+// grant access. Row-level security is what keeps each user's rows private.
+const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrY3F1d2JtbXFnYnZ4aW1waGJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NDE1MjgsImV4cCI6MjEwNjQxNzUyOH0.qmt84ec7PIEEiE_su_rU70apUkb2oYJ3uRIDaSM8c00";
+const SUPA_LIB = "https://esm.sh/@supabase/supabase-js@2.39.0";
 
-function getSupaCfg() {
-  try { return JSON.parse(localStorage.getItem(SUPA_CFG_KEY) || "null") || {}; }
-  catch { return {}; }
+const SYNC = {
+  status: "local",      // local | syncing | ready | error
+  dirty: false,         // anything changed since the last successful push
+  dirtySrs: new Set(),  // characters touched locally
+  dirtyDays: new Set(), // "YYYY-MM-DD" touched locally
+  dirtySettings: false,
+  quizQueue: [],        // quiz results not yet uploaded
+  lastAt: null,         // last successful sync (ISO)
+  lastPullAt: 0,
+  inFlight: false,
+  pushing: false,
+};
+
+let supa = null, supaBoot = null, supaUser = null;
+
+const SYNC_TEXT = {
+  local: "Local only",
+  syncing: "Syncing…",
+  ready: "Synced",
+  error: "Sync failed — retry",
+};
+
+function setSync(status) {
+  SYNC.status = status;
+  const dot = document.getElementById("acct-dot");
+  if (dot) dot.dataset.state = status;
+  const btn = document.getElementById("sync-status");
+  if (btn) btn.dataset.state = status;
+  const txt = document.getElementById("sync-status-text");
+  if (txt) txt.textContent = status === "ready" && SYNC.lastAt ? `Synced ${ago(SYNC.lastAt)}` : SYNC_TEXT[status];
+  const chip = document.getElementById("acct-sync-chip");
+  if (chip) {
+    chip.className = "chip " + (status === "error" ? "chip-quiet" : status === "ready" ? "chip-green" : "chip-brand");
+    chip.textContent = { syncing: "↻ Syncing…", ready: "● Synced", error: "⚠ Sync error", local: "● Local only" }[status];
+  }
+  if (status === "ready") paintAcctStats();
 }
-function normSupaUrl(u) {
-  return String(u || "").trim().replace(/\/+$/, "").replace(/\/(rest\/v1|auth\/v1)$/, "");
+
+function ago(iso) {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
 }
-function setSyncStatus(t) {
-  const el = document.getElementById("sync-status");
-  const map = { off: "Not connected", local: "● Local only (log in to sync)",
-    syncing: "↻ Syncing…", ready: "● Up to date", error: "⚠ Sync error — retry" };
-  if (el) el.textContent = map[t] || t;
+
+function markDirty(ch, day) {
+  SYNC.dirty = true;
+  if (ch) SYNC.dirtySrs.add(ch);
+  if (day) SYNC.dirtyDays.add(day);
+  if (supaUser) debouncedPush();
 }
+function markDirtySettings() {
+  SYNC.dirty = true;
+  SYNC.dirtySettings = true;
+  try { daily.settingsUpdatedAt = new Date().toISOString(); } catch {}
+  if (supaUser) debouncedPush();
+}
+function markDirtyCustom() {
+  SYNC.dirty = true;
+  SYNC.dirtyCustom = true;
+  if (supaUser) debouncedPush();
+}
+function markDirtyAll() {
+  SYNC.dirty = true;
+  SYNC.dirtySrs = new Set(Object.keys(daily.srs || {}));
+  SYNC.dirtyDays = new Set(Object.keys(daily.days || {}));
+  SYNC.dirtySettings = true;
+  SYNC.dirtyCustom = true;
+  SYNC.forceFull = true;
+  if (supaUser) debouncedPush();
+}
+
+// remember the finished quiz so it lands in the account's history
+function queueQuizResult() {
+  if (!quiz.items?.length) return;
+  SYNC.quizQueue.push({
+    user_id: supaUser?.id, mode: quiz.mode,
+    scope: quiz.levels || [], learned: !!quiz.learnedOnly,
+    score: quiz.score, total: quiz.items.length,
+    pct: Math.round(quiz.score / quiz.items.length * 100),
+  });
+  SYNC.quizTotal = (SYNC.quizTotal || 0) + 1;
+  markDirty();
+}
+
+// Reset means reset: drop the stored copy too, so another device can't restore it
+async function wipeCloud() {
+  const client = await supaClient();
+  if (!client || !supaUser) return false;
+  try {
+    const uid = supaUser.id;
+    const results = await Promise.all([
+      client.from("srs_cards").delete().eq("user_id", uid),
+      client.from("study_days").delete().eq("user_id", uid),
+      client.from("quiz_scores").delete().eq("user_id", uid),
+      client.from("custom_words").delete().eq("user_id", uid),
+    ]);
+    for (const r of results) if (r.error) throw r.error;
+    const p = await client.from("profiles").update({
+      xp: 0, streak: 0, longest_streak: 0, kanji_graded: 0, days_active: 0, last_active: null,
+    }).eq("id", uid);
+    if (p.error) throw p.error;
+    SYNC.quizTotal = 0;
+    return true;
+  } catch (err) {
+    console.warn("cloud wipe failed:", err?.message || err);
+    return false;
+  }
+}
+
+let pushTimer = null;
+function debouncedPush() {
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => syncNow({ quiet: true }), 5000);
+}
+
+// ---------- client ----------
 async function supaClient() {
   if (supa) return supa;
-  if (!supaReady) supaReady = (async () => {
-    const cfg = getSupaCfg();
-    if (!cfg.url || !cfg.key) return null;
-    const mod = await import("https://esm.sh/@supabase/supabase-js@2.39.0");
-    supa = mod.createClient(normSupaUrl(cfg.url), cfg.key);
-    return supa;
-  })().catch(() => null);
-  return supaReady;
-}
-function markDirty() {
-  syncDirty = true;
-  clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => { if (syncDirty) pushCloud(); }, 4000);
-}
-function readJSON(key) {
-  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
+  if (!supaBoot) supaBoot = import(SUPA_LIB)
+    .then(mod => (supa = mod.createClient(SUPA_URL, SUPA_ANON, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    })))
+    .catch(err => { console.warn("Supabase SDK failed to load:", err); supaBoot = null; return null; });
+  return supaBoot;
 }
 
-async function pushCloud(force = false) {
-  if (!force && !syncDirty) return true;
-  let client = null;
-  try { client = await supaClient(); } catch { client = null; }
-  if (!client || !supaUser) return false;
-  setSyncStatus("syncing");
+// ---------- serialise local state -> rows ----------
+const nowISO = () => new Date().toISOString();
+
+function profileRow() {
+  const graded = Object.values(daily.srs || {});
+  const reviewed = graded.reduce((a, e) => a + (e.reps || 0), 0);
+  return {
+    id: supaUser.id,
+    email: supaUser.email || null,
+    level: daily.settings.level,
+    xp: graded.length * 50 + reviewed * 10,
+    streak: daily.streak || 0,
+    longest_streak: SYNC.peakStreak || daily.streak || 0,
+    kanji_graded: graded.length,
+    days_active: Object.keys(daily.days || {}).length,
+    last_active: daily.lastActive || null,
+    last_seen_at: nowISO(),
+  };
+}
+function srsRows(chars) {
+  const out = [];
+  const list = chars && chars.length ? chars : Object.keys(daily.srs || {});
+  for (const ch of list) {
+    const e = daily.srs[ch];
+    if (!e) continue;
+    out.push({
+      user_id: supaUser.id, character: ch, level: kanjiMap.get(ch)?.level || null,
+      reps: e.reps || 0, lapses: e.lapses || 0, ease: e.ease || 2.5,
+      interval: e.interval || 0, due: e.due || dayKey(), updated_at: nowISO(),
+    });
+  }
+  return out;
+}
+function dayRows(days) {
+  const out = [];
+  const list = days && days.length ? days : Object.keys(daily.days || {});
+  for (const day of list) {
+    const d = daily.days[day];
+    if (!d) continue;
+    out.push({
+      user_id: supaUser.id, day,
+      new_chars: [...(d.newChars || [])],
+      graded: d.graded || {},
+      updated_at: nowISO(),
+    });
+  }
+  return out;
+}
+
+// ---------- push ----------
+async function pushCloud(full) {
+  const client = await supaClient();
+  if (!client || !supaUser || SYNC.pushing) return false;
+  SYNC.pushing = true;
   try {
-    stampDaily();
-    writeDailyStore();
-    const doc = { daily, best: readJSON("kanji-best"), custom: readJSON("kanji-custom"),
-      clientUpdatedAt: daily.clientUpdatedAt };
-    const { error } = await client.from("progress").upsert(
-      { user_id: supaUser.id, data: doc, updated_at: new Date().toISOString() },
-      { on_conflict: "user_id" });
-    if (error) throw error;
-    syncDirty = false;
-    setSyncStatus("ready");
-    return true;
-  } catch { setSyncStatus("error"); return false; }
+    return await pushRows(client, full);
+  } finally {
+    SYNC.pushing = false;
+  }
 }
 
+async function pushRows(client, full) {
+  const stamp = nowISO();
+  SYNC.peakStreak = Math.max(SYNC.peakStreak || 0, daily.streak || 0);
+
+  // autosync only ships what changed; a full sync ships everything
+  const srsList = full ? null : [...SYNC.dirtySrs];
+  const dayList = full ? null : [...SYNC.dirtyDays];
+
+  try {
+    if (full || SYNC.dirtySettings) {
+      const r1 = await client.from("study_settings").upsert({
+        user_id: supaUser.id, level: daily.settings.level,
+        goal: daily.settings.goal, scope: [...(daily.settings.scope || [])],
+        updated_at: stamp,
+      }, { onConflict: "user_id" });
+      if (r1.error) throw r1.error;
+    }
+    if (full || SYNC.dirtySrs.size) {
+      const rows = srsRows(srsList);
+      if (rows.length) {
+        // chunked so a big course can't blow past a single request
+        for (let i = 0; i < rows.length; i += 500) {
+          const r = await client.from("srs_cards").upsert(rows.slice(i, i + 500), { onConflict: "user_id,character" });
+          if (r.error) throw r.error;
+        }
+      }
+    }
+    if (full || SYNC.dirtyDays.size) {
+      const rows = dayRows(dayList);
+      if (rows.length) {
+        const r = await client.from("study_days").upsert(rows, { onConflict: "user_id,day" });
+        if (r.error) throw r.error;
+      }
+    }
+    if (full || SYNC.dirty) {
+      const r = await client.from("profiles").upsert(profileRow(), { onConflict: "id" });
+      if (r.error) throw r.error;
+    }
+    if (SYNC.quizQueue.length) {
+      const rows = SYNC.quizQueue.splice(0, SYNC.quizQueue.length);
+      const r = await client.from("quiz_scores").insert(rows);
+      if (r.error) { SYNC.quizQueue.unshift(...rows); throw r.error; }
+    }
+    if (full || SYNC.dirtyCustom) {
+      const words = JSON.parse(localStorage.getItem("kanji-custom") || "[]");
+      if (words.length) {
+        const r = await client.from("custom_words").upsert(words.map(w => ({
+          user_id: supaUser.id, word: w.word, reading: w.reading || "",
+          meaning: w.meaning || "", parts: w.parts || "",
+        })), { onConflict: "user_id,word" });
+        if (r.error) throw r.error;
+      }
+    }
+    SYNC.dirty = false;
+    SYNC.dirtySrs.clear();
+    SYNC.dirtyDays.clear();
+    SYNC.dirtySettings = false;
+    SYNC.dirtyCustom = false;
+    SYNC.forceFull = false;
+    SYNC.lastAt = stamp;
+    return true;
+  } catch (err) {
+    console.warn("push failed:", err?.message || err);
+    return false;
+  }
+}
+
+// ---------- pull ----------
 async function pullCloud() {
-  let client = null;
-  try { client = await supaClient(); } catch { client = null; }
+  const client = await supaClient();
   if (!client || !supaUser) return false;
-  setSyncStatus("syncing");
   try {
-    const { data } = await client.from("progress")
-      .select("data,updated_at").eq("user_id", supaUser.id).maybeSingle();
-    lastPullAt = Date.now();
-    if (data?.data?.daily) mergeCloudDoc(data.data);
-    else await pushCloud(true); // first device: upload local progress
-    if (syncDirty) await pushCloud(true);
-    else setSyncStatus("ready");
-    return true;
-  } catch { setSyncStatus("error"); return false; }
-}
+    const uid = supaUser.id;
+    const [settings, cards, days, words, bestRow, quizCount, prof] = await Promise.all([
+      client.from("study_settings").select("level,goal,scope,updated_at").eq("user_id", uid).maybeSingle(),
+      client.from("srs_cards").select("character,level,reps,lapses,ease,interval,due").eq("user_id", uid),
+      client.from("study_days").select("day,new_chars,graded").eq("user_id", uid),
+      client.from("custom_words").select("word,reading,meaning,parts").eq("user_id", uid),
+      client.from("quiz_scores").select("mode,scope,learned,score,total,pct").eq("user_id", uid).order("created_at", { ascending: false }).limit(1),
+      client.from("quiz_scores").select("id", { count: "exact", head: true }).eq("user_id", uid),
+      client.from("profiles").select("streak,longest_streak,last_active").eq("id", uid).maybeSingle(),
+    ]);
+    for (const r of [settings, cards, days, words, bestRow, prof]) if (r.error) throw r.error;
+    if (quizCount.count != null) SYNC.quizTotal = quizCount.count;
 
-// merge a cloud doc into local state: per-kanji winner = higher reps (tie: later due),
-// per-day graded prefers the newer doc, streak follows latest activity, bests take max
-function mergeCloudDoc(doc) {
-  try {
-    const cloud = doc.daily;
-    if (!cloud || !cloud.settings || !cloud.srs || !cloud.days) return;
-    const cloudNewer = (cloud.clientUpdatedAt || "") >= (daily.clientUpdatedAt || "");
-    if (cloudNewer) daily.settings = { ...daily.settings, ...cloud.settings };
-    for (const [ch, e] of Object.entries(cloud.srs || {})) {
-      const mine = daily.srs[ch];
-      if (!mine) daily.srs[ch] = e;
-      else {
-        const mr = mine.reps || 0, cr = e.reps || 0;
-        if (cr > mr || (cr === mr && (e.due || "") > (mine.due || ""))) daily.srs[ch] = e;
-      }
+    // settings — last device to change them wins (stamp is set when the user changes a setting)
+    if (settings.data && (settings.data.updated_at || "") > (daily.settingsUpdatedAt || "")) {
+      const s = settings.data;
+      daily.settings.level = LEVELS.includes(s.level) ? s.level : daily.settings.level;
+      daily.settings.goal = Math.min(20, Math.max(3, s.goal || 5));
+      const scope = (s.scope || []).filter(l => LEVELS.includes(l));
+      if (scope.length) daily.settings.scope = scope;
     }
-    for (const [day, d] of Object.entries(cloud.days || {})) {
-      if (!daily.days[day]) {
-        daily.days[day] = { newChars: [...(d.newChars || [])], graded: { ...(d.graded || {}) } };
-        if (d.sess) daily.days[day].sess = d.sess;
+
+    // SRS cards — never regress: a card with more reviews on another device wins
+    for (const c of cards.data || []) {
+      const remote = { reps: c.reps || 0, lapses: c.lapses || 0, ease: c.ease ?? 2.5, interval: c.interval || 0, due: c.due };
+      const mine = daily.srs[c.character];
+      if (!mine) { daily.srs[c.character] = remote; continue; }
+      if (!SYNC.dirtySrs.has(c.character) || remote.reps > (mine.reps || 0)) daily.srs[c.character] = remote;
+    }
+
+    // days — union, so one device can never erase another device's grades
+    for (const row of days.data || []) {
+      const mine = daily.days[row.day];
+      if (!mine) {
+        daily.days[row.day] = { newChars: [...(row.new_chars || [])], graded: { ...(row.graded || {}) } };
       } else {
-        const mine = daily.days[day];
-        mine.newChars = [...new Set([...(mine.newChars || []), ...(d.newChars || [])])];
-        mine.graded = cloudNewer
-          ? { ...(mine.graded || {}), ...(d.graded || {}) }
-          : { ...(d.graded || {}), ...(mine.graded || {}) };
-        if (d.sess && !mine.sess) mine.sess = d.sess;
+        mine.newChars = [...new Set([...(row.new_chars || []), ...(mine.newChars || [])])];
+        mine.graded = { ...(row.graded || {}), ...(mine.graded || {}) };
       }
     }
-    if ((cloud.lastActive || "") >= (daily.lastActive || "")) {
-      daily.streak = cloud.streak || 0;
-      daily.lastActive = cloud.lastActive || null;
+
+    // streak belongs to whoever was last active
+    if (prof.data?.last_active && (!daily.lastActive || prof.data.last_active > daily.lastActive)) {
+      daily.streak = prof.data.streak || 0;
+      daily.lastActive = prof.data.last_active;
     }
-    if (cloudNewer || !daily.clientUpdatedAt) daily.clientUpdatedAt = cloud.clientUpdatedAt || daily.clientUpdatedAt;
+    if (prof.data?.longest_streak) SYNC.peakStreak = Math.max(SYNC.peakStreak || 0, prof.data.longest_streak);
+
+    // custom words — insert-only, keyed by word
     try {
-      const lb = JSON.parse(localStorage.getItem("kanji-best") || "{}");
-      for (const [k, v] of Object.entries(doc.best || {})) {
-        if (!lb[k] || parseInt(v) > parseInt(lb[k])) lb[k] = v;
+      const local = JSON.parse(localStorage.getItem("kanji-custom") || "[]");
+      const seen = new Set(local.map(w => w.word));
+      let added = false;
+      for (const w of words.data || []) {
+        if (!w.word || seen.has(w.word)) continue;
+        local.push({ word: w.word, reading: w.reading || "", meaning: w.meaning || "", parts: w.parts || "" });
+        seen.add(w.word);
+        added = true;
       }
-      localStorage.setItem("kanji-best", JSON.stringify(lb));
+      if (added) localStorage.setItem("kanji-custom", JSON.stringify(local));
     } catch {}
+
+    // best % per quiz scope — keep the better of local / cloud
     try {
-      const lc = JSON.parse(localStorage.getItem("kanji-custom") || "[]");
-      const seen = new Set(lc.map(x => x.word));
-      for (const c of doc.custom || []) {
-        if (c?.word && !seen.has(c.word)) { lc.push(c); seen.add(c.word); }
+      const best = JSON.parse(localStorage.getItem("kanji-best") || "{}");
+      const s = (bestRow.data || [])[0];
+      if (s) {
+        const key = (s.scope || []).join("+") + (s.learned ? "+learned" : "");
+        if (key && (!best[key] || (s.pct || 0) > parseInt(best[key]))) best[key] = (s.pct || 0) + "%";
+        localStorage.setItem("kanji-best", JSON.stringify(best));
       }
-      localStorage.setItem("kanji-custom", JSON.stringify(lc));
     } catch {}
+
     stampDaily();
     writeDailyStore();
-    syncDirty = true;
-    buildTodaySet();
-    renderDaily();
-    restoreSess();
-    try { renderLibrary(); renderBest(); renderCompounds(); } catch {}
-  } catch {}
-}
-function paintAcct() {
-  const email = supaUser?.email || "";
-  const msg = document.getElementById("acct-msg");
-  if (msg && !msg.textContent) msg.textContent = email ? `Logged in as ${email}` : "";
-  const lo = document.getElementById("acct-logout");
-  if (lo) lo.classList.toggle("hidden", !supaUser);
-  const av = document.getElementById("hdr-level");
-  if (av) av.title = email ? `Synced as ${email} — click for account` : "Study level — click for account";
-}
-function openAcct() {
-  const cfg = getSupaCfg();
-  const u = document.getElementById("supa-url");
-  if (!u) return;
-  u.value = cfg.url || "";
-  document.getElementById("supa-key").value = cfg.key || "";
-  document.getElementById("acct-msg").textContent = "";
-  paintAcct();
-  document.getElementById("acct-modal").classList.remove("hidden");
+    SYNC.lastPullAt = Date.now();
+    return true;
+  } catch (err) {
+    console.warn("pull failed:", err?.message || err);
+    return false;
+  }
 }
 
+// ---------- orchestration ----------
+async function syncNow(opts = {}) {
+  if (!supaUser) return false;
+  if (SYNC.inFlight) return false;
+  SYNC.inFlight = true;
+  if (!opts.quiet) setSync("syncing");
+  try {
+    const ok = await pullCloud();
+    const pushed = await pushCloud(!!opts.forceFull);
+    if (pushed) setSync("ready");
+    else if (!opts.quiet) setSync(SYNC.dirty ? "error" : "ready");
+    return ok && pushed;
+  } finally {
+    SYNC.inFlight = false;
+  }
+}
+
+let supaBooting = false;
 async function supaInit() {
-  if (!SUPA_ENABLED) return; // disabled — everything stays local-only
-  let client = null;
-  try { client = await supaClient(); } catch { client = null; }
-  if (!client) { setSyncStatus("local"); paintAcct(); return; }
+  if (supaBooting) return;
+  supaBooting = true;
+  const client = await supaClient();
+  if (!client) { supaBooting = false; setSync("error"); return; }
   try {
     const { data: { session } } = await client.auth.getSession();
     supaUser = session?.user || null;
-    if (supaUser) await pullCloud();
-    else setSyncStatus("local");
-  } catch { setSyncStatus("error"); }
+    if (supaUser) {
+      await syncNow({ quiet: true, forceFull: true });
+      setSync("ready");
+    } else {
+      setSync("local");
+    }
+  } catch { setSync("error"); }
+  supaBooting = false;
   paintAcct();
 }
 
-async function acctAuth(mode) {
-  const msgEl = document.getElementById("acct-msg");
-  const msg = (t) => { if (msgEl) msgEl.textContent = t; };
-  let client = null;
-  try { client = await supaClient(); } catch { client = null; }
-  if (!client) { msg("Save your Project URL + anon key first."); return; }
-  const email = document.getElementById("acct-email").value.trim();
-  const password = document.getElementById("acct-pass").value;
-  if (!email || !password) { msg("Enter email + password."); return; }
-  msg(mode === "signup" ? "Creating account…" : "Logging in…");
-  try {
-    const res = mode === "signup"
-      ? await client.auth.signUp({ email, password })
-      : await client.auth.signInWithPassword({ email, password });
-    if (res.error) throw res.error;
-    supaUser = res.data.user || res.data.session?.user || null;
-    if (!supaUser) {
-      try {
-        const s = await client.auth.getSession();
-        supaUser = s.data.session?.user || null;
-      } catch {}
-    }
-    if (!supaUser) {
-      msg("Account created — check your inbox to confirm (or turn off “Confirm email” in Supabase → Auth → Providers → Email for instant access).");
-      paintAcct();
-      return;
-    }
-    msg("Logged in — syncing…");
-    await pullCloud();
-    await pushCloud(true);
-    setSyncStatus("ready");
-    paintAcct();
-  } catch (e) { msg("Error: " + (e.message || e)); setSyncStatus("error"); }
+// ---------- account UI ----------
+function acctMsg(text, kind) {
+  for (const id of ["acct-msg", "acct-msg-in"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const active = id === (supaUser ? "acct-msg-in" : "acct-msg");
+    el.textContent = active ? text : "";
+    el.className = "feedback acct-msg" + (text ? " " + (kind || "busy") : "");
+  }
 }
 
-document.getElementById("hdr-level").onclick = () => {
-  document.querySelector("[data-tab='daily']").click();
-  scrollTo(document.getElementById("sess-box"), { behavior: "smooth", block: "center" });
+function paintAcctStats() {
+  const graded = Object.keys(daily.srs || {}).length;
+  const reviewed = Object.values(daily.srs || {}).reduce((a, e) => a + (e.reps || 0), 0);
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set("acct-email-label", supaUser?.email || "Signed in");
+  set("acct-level", daily.settings.level);
+  set("acct-streak", daily.streak || 0);
+  set("acct-graded", graded);
+  set("acct-xp", (graded * 50 + reviewed * 10).toLocaleString());
+  set("acct-last", SYNC.lastAt ? ago(SYNC.lastAt) : "—");
+  set("acct-days", Object.keys(daily.days || {}).length);
+  set("acct-quizzes", SYNC.quizTotal ?? "0");
+}
+
+function paintAcct() {
+  const signedIn = !!supaUser;
+  document.getElementById("acct-out").classList.toggle("hidden", signedIn);
+  document.getElementById("acct-in").classList.toggle("hidden", !signedIn);
+  if (signedIn) {
+    document.getElementById("acct-msg").textContent = "";
+    document.getElementById("acct-msg").className = "feedback acct-msg";
+    paintAcctStats();
+  }
+  const av = document.getElementById("hdr-level");
+  if (av) {
+    av.textContent = signedIn ? (supaUser.email || "•").slice(0, 1).toUpperCase() : daily.settings.level;
+    av.title = signedIn ? `${supaUser.email} — your account` : "Sign in to sync across devices";
+    av.classList.toggle("is-acct", signedIn);
+  }
+  setSync(SYNC.status);
+}
+
+function acctMode() {
+  const on = document.querySelector('#acct-modes input[name="acct-mode"]:checked');
+  return on ? on.value : "login";
+}
+function paintAcctMode() {
+  const signup = acctMode() === "signup";
+  document.getElementById("acct-submit").textContent = signup ? "Create account" : "Sign in";
+  document.getElementById("acct-pass2-field").classList.toggle("hidden", !signup);
+  document.getElementById("acct-pass").autocomplete = signup ? "new-password" : "current-password";
+  document.getElementById("acct-pass2").required = signup;
+  acctMsg("");
+}
+function openAcct() {
+  acctMsg("");
+  paintAcct();
+  document.getElementById("acct-modal").classList.remove("hidden");
+  setTimeout(() => (supaUser ? document.getElementById("sync-now") : document.getElementById("acct-email")).focus(), 60);
+}
+function closeAcct() { document.getElementById("acct-modal").classList.add("hidden"); }
+
+async function acctSubmit(mode) {
+  const client = await supaClient();
+  if (!client) { acctMsg("Couldn't reach the sign-in service. Check your connection and try again.", "no"); return; }
+  const email = document.getElementById("acct-email").value.trim();
+  const pass = document.getElementById("acct-pass").value;
+  if (!email || !pass) { acctMsg("Enter your email and password.", "no"); return; }
+  if (mode === "signup") {
+    if (pass.length < 8) { acctMsg("Use at least 8 characters for your password.", "no"); return; }
+    if (pass !== document.getElementById("acct-pass2").value) { acctMsg("Those passwords don't match.", "no"); return; }
+  }
+  const submit = document.getElementById("acct-submit");
+  submit.disabled = true;
+  acctMsg(mode === "signup" ? "Creating your account…" : "Signing you in…", "busy");
+  try {
+    const res = mode === "signup"
+      ? await client.auth.signUp({ email, password: pass })
+      : await client.auth.signInWithPassword({ email, password: pass });
+    if (res.error) throw res.error;
+    supaUser = res.data.user || res.data.session?.user || null;
+    if (!supaUser) supaUser = (await client.auth.getSession()).data.session?.user || null;
+
+    if (mode === "signup" && !res.data.session) {
+      // "Confirm email" is on in this project — the account exists but can't sign in yet
+      acctMsg("Account created ✅ Check your inbox for the confirmation link, then sign in.", "ok");
+      document.getElementById("acct-email").value = email;
+      paintAcct();
+      submit.disabled = false;
+      paintAcctMode();
+      document.querySelector('#acct-modes input[value="login"]').checked = true;
+      paintAcctMode();
+      return;
+    }
+
+    paintAcct();
+    await syncNow({ quiet: true, forceFull: true });
+    setSync("ready");
+    paintAcct();
+    acctMsg("");
+  } catch (err) {
+    const raw = err?.message || String(err);
+    acctMsg(/invalid login/i.test(raw) ? "That email and password don't match."
+      : /already registered/i.test(raw) ? "That email already has an account — sign in instead."
+      : raw, "no");
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+// ---------- wiring ----------
+const acctModal = document.getElementById("acct-modal");
+document.getElementById("acct-close").onclick = closeAcct;
+acctModal.onclick = e => { if (e.target === acctModal) closeAcct(); };
+document.getElementById("side-acct").onclick = () => { openAcct(); closeNav(); };
+document.getElementById("hdr-level").onclick = openAcct;
+document.getElementById("sync-status").onclick = openAcct;
+
+document.querySelectorAll('#acct-modes input[name="acct-mode"]').forEach(i => i.onchange = paintAcctMode);
+document.getElementById("acct-form").onsubmit = e => { e.preventDefault(); acctSubmit(acctMode()); };
+document.getElementById("acct-pass-eye").onclick = () => {
+  const i = document.getElementById("acct-pass");
+  const show = i.type === "password";
+  i.type = show ? "text" : "password";
+  document.getElementById("acct-pass-eye").textContent = show ? "hide" : "show";
 };
-// Supabase cloud sync is DISABLED for now (flip SUPA_ENABLED to re-enable).
-// The whole block below no-ops while the account UI is absent from the page.
-if (document.getElementById("acct-btn")) {
-document.getElementById("acct-btn").onclick = openAcct;
-document.getElementById("acct-close").onclick = () =>
-  document.getElementById("acct-modal").classList.add("hidden");
-document.getElementById("supa-save").onclick = async () => {
-  const url = normSupaUrl(document.getElementById("supa-url").value);
-  const key = document.getElementById("supa-key").value.trim();
-  try { localStorage.setItem(SUPA_CFG_KEY, JSON.stringify({ url, key })); } catch {}
-  supa = null; supaReady = null;
-  document.getElementById("acct-msg").textContent = url && key ? "Connecting…" : "Enter Project URL + anon key.";
-  await supaInit();
+document.getElementById("sync-now").onclick = async () => {
+  acctMsg("Syncing…", "busy");
+  const ok = await syncNow({ forceFull: true });
+  acctMsg(ok ? "Up to date ✅" : "Couldn't reach the server — your local progress is safe, try again in a moment.", ok ? "ok" : "no");
+  paintAcctStats();
 };
-document.getElementById("acct-login").onclick = () => acctAuth("login");
-document.getElementById("acct-signup").onclick = () => acctAuth("signup");
 document.getElementById("acct-logout").onclick = async () => {
   await pushCloud(true);
   try { (await supaClient())?.auth.signOut(); } catch {}
   supaUser = null;
-  syncDirty = false;
-  setSyncStatus("local");
+  SYNC.dirty = false;
+  SYNC.dirtySrs.clear();
+  SYNC.dirtyDays.clear();
+  setSync("local");
   paintAcct();
+  closeAcct();
 };
-document.getElementById("sync-now").onclick = async () => {
-  if (!supaUser) { openAcct(); return; }
-  await pullCloud();
-  syncDirty = true;
-  await pushCloud(true);
-  try { renderDaily(); } catch {}
-};
-} // end Supabase-disabled guard
-setInterval(() => { if (syncDirty && supaUser) pushCloud(); }, 120000);
-document.addEventListener("online", () => { if (supaUser) pullCloud(); });
+
+// mirror the session into the UI. INITIAL_SESSION and TOKEN_REFRESHED are
+// already handled by supaInit() — reacting to them would re-enter in a loop.
+supaClient().then(c => c.auth.onAuthStateChange(event => {
+  if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") return;
+  supaUser = event.session?.user || null;
+  paintAcct();
+  if (supaUser) syncNow({ quiet: true, forceFull: true });
+  else setSync("local");
+})).catch(() => {});
+setInterval(() => { if (SYNC.dirty && supaUser && !document.hidden) syncNow({ quiet: true }); }, 120000);
+document.addEventListener("online", () => { if (supaUser) syncNow({ quiet: true }); });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && supaUser && Date.now() - lastPullAt > 5 * 60 * 1000) pullCloud();
+  if (!document.hidden && supaUser && Date.now() - SYNC.lastPullAt > 60 * 1000) syncNow({ quiet: true });
 });
+
 
 paintIcons();
 loadData().catch(err => {

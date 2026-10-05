@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>KanjiLearn — JLPT N5 → N1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,10 +15,11 @@
   <div class="nav-scrim" id="nav-scrim"></div>
 
   <!-- ============ SIDEBAR ============ -->
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
     <div class="brand">
       <span class="brand-mark">漢</span>
       <span class="brand-txt"><b>KanjiLearn</b><small>JLPT N5 → N1</small></span>
+      <button class="icon-btn side-close" id="side-close" aria-label="Close menu"><i data-ico="x"></i></button>
     </div>
 
     <nav class="side-nav">
@@ -31,11 +32,15 @@
       </div>
 
       <p class="eyebrow">Preferences</p>
+      <button class="side-link" id="side-acct"><i data-ico="user"></i><span>Account</span><i class="sync-dot" id="acct-dot" data-state="local" title="Local only"></i></button>
       <button class="side-link" id="side-shortcuts"><i data-ico="kbd"></i><span>Shortcuts</span></button>
       <button class="side-link" id="side-theme"><i data-ico="moon"></i><span id="side-theme-label">Dark mode</span></button>
     </nav>
 
     <div class="side-foot">
+      <button class="sync-status" id="sync-status" data-state="local">
+        <i class="dot"></i><span id="sync-status-text">Local only</span>
+      </button>
       <div class="mnemonic">
         <b>Mnemonic Memory Aid</b>
         <p>Connect the round sun with a sunspot or horizon mark across the character.</p>
@@ -46,7 +51,7 @@
   <!-- ============ WORKSPACE ============ -->
   <div class="workspace">
     <header class="topbar">
-      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu"><i data-ico="menu"></i></button>
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"><i data-ico="menu"></i></button>
       <div class="search">
         <i data-ico="search"></i>
         <input id="hdr-search" placeholder="Search kanji, radicals, meanings…" autocomplete="off" />
@@ -56,7 +61,7 @@
         <span id="hdr-streak" class="chip chip-streak">🔥 0 days</span>
         <span id="hdr-xp" class="chip chip-xp">◈ 0 XP</span>
         <button class="icon-btn" id="theme-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
-        <button class="avatar" id="hdr-level" title="Study level">N4</button>
+        <button class="avatar" id="hdr-level" title="Your account" aria-label="Your account">N4</button>
       </div>
     </header>
 
@@ -71,7 +76,6 @@
       </div>
       <div class="head-tools">
         <button class="btn btn-ghost" id="daily-reset" title="Clear all SRS memory on this device">Reset</button>
-        <button class="btn btn-primary" id="daily-start">▶ Resume Session</button>
       </div>
     </div>
 
@@ -139,21 +143,6 @@
             <span class="chip chip-quiet" id="daily-rev-count">0</span>
           </div>
           <div class="grid" id="daily-rev"></div>
-          <div class="btn-row end">
-            <button class="btn btn-ghost btn-sm" id="sess-learn">Learn today's kanji</button>
-          </div>
-        </div>
-
-        <div class="card" id="sess-box">
-          <div class="card-head">
-            <h3>Guided Session</h3>
-            <div class="btn-row tight">
-              <button id="sess-prev" class="btn btn-ghost btn-sm">← Prev</button>
-              <button id="sess-next-2" class="btn btn-ghost btn-sm">Next →</button>
-            </div>
-          </div>
-          <p class="stats" id="sess-status">Press Start to walk through today's kanji one by one.</p>
-          <div id="sess-card" class="sess-card"></div>
         </div>
 
         <div id="daily-done" class="card done-card hidden">
@@ -490,6 +479,73 @@
       <li><span>Focus search</span><kbd>⌘K</kbd> / <kbd>/</kbd></li>
       <li><span>Close dialog</span><kbd>Esc</kbd></li>
     </ul>
+  </div>
+</div>
+
+<div id="acct-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="acct-title">
+  <div class="modal-card sm">
+    <button id="acct-close" class="modal-x" aria-label="Close">✕</button>
+
+    <!-- ---------- signed out ---------- -->
+    <div id="acct-out">
+      <p class="eyebrow">Account</p>
+      <h3 id="acct-title" class="acct-h">Save your progress</h3>
+      <p class="sub acct-lede">Study on this device as usual. Sign in and everything follows you to your phone, tablet and PC.</p>
+
+      <div class="levels seg acct-modes" id="acct-modes" role="tablist">
+        <label><input type="radio" name="acct-mode" value="login" checked /><span>Sign in</span></label>
+        <label><input type="radio" name="acct-mode" value="signup" /><span>Sign up</span></label>
+      </div>
+
+      <form id="acct-form" class="acct-form" autocomplete="on">
+        <label class="field">
+          <span class="eyebrow">Email</span>
+          <input id="acct-email" type="email" placeholder="you@example.com" autocomplete="username" required />
+        </label>
+        <label class="field">
+          <span class="eyebrow">Password</span>
+          <span class="pass-wrap">
+            <input id="acct-pass" type="password" placeholder="••••••••" autocomplete="current-password" minlength="8" required />
+            <button type="button" class="pass-eye" id="acct-pass-eye" aria-label="Show password">show</button>
+          </span>
+        </label>
+        <label class="field hidden" id="acct-pass2-field">
+          <span class="eyebrow">Confirm password</span>
+          <input id="acct-pass2" type="password" placeholder="••••••••" autocomplete="new-password" minlength="8" />
+        </label>
+        <p class="feedback acct-msg" id="acct-msg"></p>
+        <button class="btn btn-primary wide" id="acct-submit" type="submit">Sign in</button>
+      </form>
+
+      <p class="sub acct-foot">Only you can read your progress — every table is locked to your account by Supabase row-level security.</p>
+    </div>
+
+    <!-- ---------- signed in ---------- -->
+    <div id="acct-in" class="hidden">
+      <p class="eyebrow">Signed in</p>
+      <h3 class="acct-h" id="acct-email-label">—</h3>
+      <span class="chip chip-green" id="acct-sync-chip">● Synced</span>
+
+      <div class="acct-stats">
+        <div class="stat-tile"><span class="eyebrow">Level</span><b id="acct-level">N4</b><small>current scope</small></div>
+        <div class="stat-tile alt"><span class="eyebrow">Streak</span><b id="acct-streak">0</b><small>days in a row</small></div>
+        <div class="stat-tile"><span class="eyebrow">Graded</span><b id="acct-graded">0</b><small>kanji in memory</small></div>
+        <div class="stat-tile alt"><span class="eyebrow">XP</span><b id="acct-xp">0</b><small>lifetime</small></div>
+      </div>
+
+      <div class="acct-rows">
+        <div class="acct-row"><span>Last synced</span><b id="acct-last">—</b></div>
+        <div class="acct-row"><span>Days studied</span><b id="acct-days">0</b></div>
+        <div class="acct-row"><span>Quizzes taken</span><b id="acct-quizzes">0</b></div>
+      </div>
+
+      <p class="feedback acct-msg" id="acct-msg-in"></p>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" id="sync-now">↻ Sync now</button>
+        <button class="btn btn-ghost btn-sm" id="acct-logout">Sign out</button>
+      </div>
+      <p class="sub acct-foot">Progress is stored on this device and in your account. Signing out keeps the local copy.</p>
+    </div>
   </div>
 </div>
 
