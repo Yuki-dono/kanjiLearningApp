@@ -2127,19 +2127,30 @@ async function acctSubmit(mode) {
 
 // a failed sync is almost never "no internet" — name the actual reason so the
 // learner knows whether to retry, fix their connection, or ask for help
-// Said whenever the page is served by something that isn't the API — a static
-// host, or opening index.html from disk. Kept in one place because it's the
-// single most confusing failure this setup can produce.
-const NO_SERVER_HELP =
-  "No sync server at this address. Open http://localhost:8000 — that's the API server, " +
-  "which serves the site too. If you host the site separately, set API_BASE in config.js to the server's URL.";
+// What to say when there's no API to talk to. The fix is genuinely different in
+// each case, and giving the wrong one sends people off in the wrong direction:
+// telling someone on a deployed site to "open localhost" makes them test a
+// different origin and hides the real problem.
+function noServerHelp() {
+  if (LOCAL_HOSTS.includes(location.hostname)) {
+    return "No sync server running locally. Start it: cd server, then " +
+      "uvicorn app.main:app --port 8000 — then open http://localhost:8000.";
+  }
+  if (!API_BASE) {
+    return "This deployment isn't configured with an API address, so " +
+      `${location.hostname} has nothing to sync with. Set API_URL in config.js to your ` +
+      "deployed API (e.g. https://kanji-learn-api.onrender.com) and push.";
+  }
+  return `No response from the API at ${API_BASE}. Check that it's deployed and awake, ` +
+    `and that CORS_ORIGINS on it allows ${location.origin}.`;
+}
 
 function syncErrorText() {
   const e = (SYNC.lastError || "").toLowerCase();
   // Most specific first. A 404 that arrives without a JSON body never matched
   // a route, which means the page is being served by something other than the
   // API — worth naming outright rather than reporting as a generic failure.
-  if (e.includes("no sync server") || e.includes("404")) return NO_SERVER_HELP;
+  if (e.includes("no sync server") || e.includes("404")) return noServerHelp();
   if (!e) return "Couldn't reach the server — your local progress is safe, try again in a moment.";
   if (e.includes("no connection") || e.includes("network") || e.includes("fetch"))
     return "No connection to the sync server — check your internet and try again. Local progress is safe.";
@@ -2182,7 +2193,7 @@ document.getElementById("sync-now").onclick = async () => {
   // this is where someone would do that.
   if (!await apiHealth()) {
     setSync("nobackend");
-    acctMsg(NO_SERVER_HELP, "no");
+    acctMsg(noServerHelp(), "no");
     return;
   }
   acctMsg("Syncing…", "busy");

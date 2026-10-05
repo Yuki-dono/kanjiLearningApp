@@ -125,10 +125,29 @@ def test_sync_now_uses_the_derived_failure_status(repo_root):
     assert "setSync(SYNC.dirty ? \"error\" : \"ready\")" not in source
 
 
-def test_a_missing_server_is_named_in_the_error_text(repo_root):
+def test_missing_server_advice_covers_all_three_cases(repo_root):
+    """The fix differs per situation, and the wrong one sends people sideways.
+
+    Telling someone on a deployed site to "open localhost" makes them test a
+    different origin, which looks like it works and hides the real problem.
+    """
     source = read(repo_root, "app.js")
-    assert "NO_SERVER_HELP" in source
-    assert "localhost:8000" in source, "the message should point at the API server"
+    assert "function noServerHelp()" in source
+
+    help_text = source[source.index("function noServerHelp()") : source.index("function syncErrorText()")]
+    assert "LOCAL_HOSTS.includes(location.hostname)" in help_text, "must detect a local run"
+    assert "!API_BASE" in help_text, "must detect an unconfigured deployment"
+    assert "CORS_ORIGINS" in help_text, "must mention CORS when an address is set but unreachable"
+    assert help_text.count("return") == 3, "expected exactly three branches"
+
+
+def test_advice_names_the_setting_people_actually_edit(repo_root):
+    """API_BASE is the localhost escape hatch; API_URL is the deployed one."""
+    source = read(repo_root, "app.js")
+    help_text = source[source.index("function noServerHelp()") : source.index("function syncErrorText()")]
+
+    assert "API_URL in config.js" in help_text
+    assert "set API_BASE in config.js" not in help_text, "stale pointer to the old setting name"
 
 
 def test_client_still_has_no_direct_table_access(repo_root):
