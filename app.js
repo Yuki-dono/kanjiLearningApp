@@ -2238,6 +2238,7 @@ document.addEventListener("visibilitychange", () => {
 
 
 paintIcons();
+console.log(`KanjiLearn build ${CFG.BUILD ?? "?"} · api ${API_BASE || "(same origin)"}`);
 loadData().catch(err => {
   document.getElementById("lib-stats").textContent =
     "Failed to load the kanji data. Serve this over http:// from the project root " +

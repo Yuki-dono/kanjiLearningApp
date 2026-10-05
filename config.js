@@ -8,6 +8,11 @@
 // Anything secret belongs in server/.env and must never appear in this file:
 // this is served to every visitor.
 window.KANJI_CONFIG = {
+  // Bumped on every change. Logged to the console on boot so "is the deployed
+  // copy actually current?" is answerable without a build step — open devtools
+  // and compare against git log.
+  BUILD: 5,
+
   SUPABASE_URL: "https://qkcquwbmmqgbvximphbz.supabase.co",
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrY3F1d2JtbXFnYnZ4aW1waGJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NDE1MjgsImV4cCI6MjEwNjQxNzUyOH0.qmt84ec7PIEEiE_su_rU70apUkb2oYJ3uRIDaSM8c00",
 

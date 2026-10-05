@@ -6,6 +6,11 @@
 # there is no /api/* on this origin.
 
 [build]
+  # No build step: the repo root *is* the site. `command = ""` is explicit so a
+  # build command Netlify guessed in the UI can't fail the deploy — netlify.toml
+  # only overrides UI settings for keys it actually contains, and without this
+  # one a stale UI command would still run.
+  command = ""
   publish = "."
 
 # The dictionaries are 3.8MB and only change on a redeploy, so cache them hard.

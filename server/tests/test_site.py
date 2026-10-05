@@ -88,3 +88,30 @@ async def test_protected_endpoints_reject_anonymous_callers(client):
 async def test_content_needs_no_sign_in(client):
     """The dictionaries are public — only progress is behind the token."""
     assert (await client.get("/api/content/vocab/n1")).status_code == 200
+
+
+# --------------------------------------------------------------------------
+# deploy freshness
+# --------------------------------------------------------------------------
+
+
+async def test_build_marker_is_present_and_logged(repo_root):
+    """"Is the deployed copy current?" has to be answerable from the browser."""
+    config = (repo_root / "config.js").read_text(encoding="utf-8")
+    assert re.search(r"BUILD:\s*\d+", config), "config.js needs a numeric BUILD marker"
+
+    app = (repo_root / "app.js").read_text(encoding="utf-8")
+    assert "CFG.BUILD" in app, "app.js should report the build marker"
+
+
+async def test_netlify_config_disables_the_build_command(repo_root):
+    """netlify.toml only overrides the UI keys it actually contains.
+
+    Without an explicit empty command, a build command Netlify guessed in its UI
+    would still run -- and with no package.json it would fail the deploy.
+    """
+    import tomllib
+
+    config = tomllib.loads((repo_root / "netlify.toml").read_text(encoding="utf-8"))
+    assert config["build"]["command"] == "", "build command must be explicitly empty"
+    assert config["build"]["publish"] == ".", "publish directory must be the repo root"
