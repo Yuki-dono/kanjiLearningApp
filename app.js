@@ -8,9 +8,25 @@ const LIB_PAGE_SIZE = 24;
 let compShown = 60;
 
 // ---------- load ----------
+// Content comes from our API. The server also serves the very same files
+// statically, so a hiccup there degrades to a plain static fetch rather than an
+// empty app — the app is meant to work offline.
+async function fetchContent(kind, level) {
+  const slug = level.toLowerCase();
+  try {
+    const viaApi = await fetch(`${API_BASE}/api/content/${kind}/${slug}`);
+    if (!viaApi.ok) throw new Error(String(viaApi.status));
+    return await viaApi.json();
+  } catch {
+    const fallback = await fetch(`data/${kind}-${slug}.json`);
+    if (!fallback.ok) throw new Error(`${kind}-${slug}.json returned ${fallback.status}`);
+    return fallback.json();
+  }
+}
+
 async function loadData() {
-  const kPromises = LEVELS.map(l => fetch(`data/kanji-${l.toLowerCase()}.json`).then(r => r.json()));
-  const vPromises = LEVELS.map(l => fetch(`data/vocab-${l.toLowerCase()}.json`).then(r => r.json()));
+  const kPromises = LEVELS.map(l => fetchContent("kanji", l));
+  const vPromises = LEVELS.map(l => fetchContent("vocab", l));
   const kAll = await Promise.all(kPromises);
   const vAll = await Promise.all(vPromises);
   KANJI = kAll.flat();
@@ -1590,20 +1606,27 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ============================================================================
-//  ACCOUNT + CLOUD SYNC (Supabase)
+//  ACCOUNT + CLOUD SYNC
 //
 //  Local-first. Everything keeps working offline in localStorage; when an
-//  account is connected the same data is mirrored to Supabase and merged back
+//  account is connected the same data is mirrored to our backend and merged back
 //  on every visit, so progress follows the user between devices.
 //
+//  Supabase authenticates. Our API (server/app) owns the data: it verifies the
+//  access token, scopes every request to the signed-in account, and recomputes
+//  XP / streak itself rather than trusting totals the browser reports.
+//
 //  Tables (see supabase-schema.sql): profiles · study_settings · srs_cards
-//  · study_days · quiz_scores · custom_words — all locked to auth.uid() by RLS.
+//  · study_days · quiz_scores · custom_words
 // ============================================================================
-const SUPA_URL = "https://qkcquwbmmqgbvximphbz.supabase.co";
-// The anon key is a *public* client key — it identifies the project, it does not
-// grant access. Row-level security is what keeps each user's rows private.
-const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrY3F1d2JtbXFnYnZ4aW1waGJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NDE1MjgsImV4cCI6MjEwNjQxNzUyOH0.qmt84ec7PIEEiE_su_rU70apUkb2oYJ3uRIDaSM8c00";
+// Supabase is only used for authentication here (login / signup / token refresh).
+// All data access goes through our own API — see server/app/.
+const CFG = window.KANJI_CONFIG || {};
+const SUPA_URL = CFG.SUPABASE_URL;
+const SUPA_ANON = CFG.SUPABASE_ANON_KEY;
 const SUPA_LIB = "https://esm.sh/@supabase/supabase-js@2.39.0";
+// Our API server. Empty string means same origin.
+const API_BASE = CFG.API_BASE || "";
 
 const SYNC = {
   status: "local",      // local | syncing | ready | error
@@ -1615,6 +1638,7 @@ const SYNC = {
   lastAt: null,         // last successful sync (ISO)
   lastPullAt: 0,
   lastError: null,       // why the last sync failed, so the UI can say something useful
+  stats: null,           // totals computed server-side (xp, streak, days_active…)
   inFlight: false,
   pushing: false,
 };
@@ -1682,33 +1706,25 @@ function markDirtyAll() {
 // remember the finished quiz so it lands in the account's history
 function queueQuizResult() {
   if (!quiz.items?.length) return;
+  SYNC.quizTotal = (SYNC.quizTotal || 0) + 1;
+  markDirty();
+  // Only queue it when there's an account to attach it to. The server stamps the
+  // owning account itself, so an attempt finished while signed out would
+  // otherwise be uploaded against whoever signed in next.
+  if (!supaUser) return;
   SYNC.quizQueue.push({
-    user_id: supaUser?.id, mode: quiz.mode,
+    mode: quiz.mode,
     scope: quiz.levels || [], learned: !!quiz.learnedOnly,
     score: quiz.score, total: quiz.items.length,
     pct: Math.round(quiz.score / quiz.items.length * 100),
   });
-  SYNC.quizTotal = (SYNC.quizTotal || 0) + 1;
-  markDirty();
 }
 
 // Reset means reset: drop the stored copy too, so another device can't restore it
 async function wipeCloud() {
-  const client = await supaClient();
-  if (!client || !supaUser) return false;
+  if (!supaUser) return false;
   try {
-    const uid = supaUser.id;
-    const results = await Promise.all([
-      client.from("srs_cards").delete().eq("user_id", uid),
-      client.from("study_days").delete().eq("user_id", uid),
-      client.from("quiz_scores").delete().eq("user_id", uid),
-      client.from("custom_words").delete().eq("user_id", uid),
-    ]);
-    for (const r of results) if (r.error) throw r.error;
-    const p = await client.from("profiles").update({
-      xp: 0, streak: 0, longest_streak: 0, kanji_graded: 0, days_active: 0, last_active: null,
-    }).eq("id", uid);
-    if (p.error) throw p.error;
+    await apiWipe();
     SYNC.quizTotal = 0;
     return true;
   } catch (err) {
@@ -1734,25 +1750,16 @@ async function supaClient() {
   return supaBoot;
 }
 
-// ---------- serialise local state -> rows ----------
+// ---------- serialise local state -> request body ----------
 const nowISO = () => new Date().toISOString();
 
-function profileRow() {
-  const graded = Object.values(daily.srs || {});
-  const reviewed = graded.reduce((a, e) => a + (e.reps || 0), 0);
-  return {
-    id: supaUser.id,
-    email: supaUser.email || null,
-    level: daily.settings.level,
-    xp: graded.length * 50 + reviewed * 10,
-    streak: daily.streak || 0,
-    longest_streak: SYNC.peakStreak || daily.streak || 0,
-    kanji_graded: graded.length,
-    days_active: Object.keys(daily.days || {}).length,
-    last_active: daily.lastActive || null,
-    last_seen_at: nowISO(),
-  };
-}
+// No user_id anywhere in here: the server reads the account off the access token
+// and stamps it onto every row, so there is no value here worth forging.
+
+// The profile row (xp, streak, kanji_graded…) is no longer built here. It used to
+// be computed in the browser and uploaded, which meant anyone could edit
+// localStorage and post a huge total. The server derives it from the study rows
+// on every push instead — see server/app/stats.py.
 function srsRows(chars) {
   const out = [];
   const list = chars && chars.length ? chars : Object.keys(daily.srs || {});
@@ -1760,9 +1767,9 @@ function srsRows(chars) {
     const e = daily.srs[ch];
     if (!e) continue;
     out.push({
-      user_id: supaUser.id, character: ch, level: kanjiMap.get(ch)?.level || null,
+      character: ch, level: kanjiMap.get(ch)?.level || null,
       reps: e.reps || 0, lapses: e.lapses || 0, ease: e.ease || 2.5,
-      interval: e.interval || 0, due: e.due || dayKey(), updated_at: nowISO(),
+      interval: e.interval || 0, due: e.due || dayKey(),
     });
   }
   return out;
@@ -1774,10 +1781,9 @@ function dayRows(days) {
     const d = daily.days[day];
     if (!d) continue;
     out.push({
-      user_id: supaUser.id, day,
+      day,
       new_chars: [...(d.newChars || [])],
       graded: d.graded || {},
-      updated_at: nowISO(),
     });
   }
   return out;
@@ -1785,69 +1791,53 @@ function dayRows(days) {
 
 // ---------- push ----------
 async function pushCloud(full) {
-  const client = await supaClient();
-  if (!client || !supaUser || SYNC.pushing) return false;
+  if (!supaUser || SYNC.pushing) return false;
   SYNC.pushing = true;
   try {
-    return await pushRows(client, full);
+    return await pushRows(full);
   } finally {
     SYNC.pushing = false;
   }
 }
 
-async function pushRows(client, full) {
+// One request. The server does the chunking (500 rows at a time) and merges on
+// conflict, so the six separate upserts this used to make are a single round trip.
+async function pushRows(full) {
   const stamp = nowISO();
-  SYNC.peakStreak = Math.max(SYNC.peakStreak || 0, daily.streak || 0);
 
   // autosync only ships what changed; a full sync ships everything
   const srsList = full ? null : [...SYNC.dirtySrs];
   const dayList = full ? null : [...SYNC.dirtyDays];
 
+  const payload = { full: !!full };
+
+  if (full || SYNC.dirtySettings) {
+    payload.settings = {
+      level: daily.settings.level,
+      goal: daily.settings.goal,
+      scope: [...(daily.settings.scope || [])],
+      updated_at: stamp,
+    };
+  }
+  if (full || SYNC.dirtySrs.size) payload.srs = srsRows(srsList);
+  if (full || SYNC.dirtyDays.size) payload.days = dayRows(dayList);
+  if (full || SYNC.dirtyCustom) {
+    const words = JSON.parse(localStorage.getItem("kanji-custom") || "[]");
+    if (words.length) {
+      payload.custom_words = words.map(w => ({
+        word: w.word, reading: w.reading || "",
+        meaning: w.meaning || "", parts: w.parts || "",
+      }));
+    }
+  }
+  if (SYNC.quizQueue.length) payload.quiz_scores = SYNC.quizQueue.slice();
+
   try {
-    if (full || SYNC.dirtySettings) {
-      const r1 = await client.from("study_settings").upsert({
-        user_id: supaUser.id, level: daily.settings.level,
-        goal: daily.settings.goal, scope: [...(daily.settings.scope || [])],
-        updated_at: stamp,
-      }, { onConflict: "user_id" });
-      if (r1.error) throw r1.error;
-    }
-    if (full || SYNC.dirtySrs.size) {
-      const rows = srsRows(srsList);
-      if (rows.length) {
-        // chunked so a big course can't blow past a single request
-        for (let i = 0; i < rows.length; i += 500) {
-          const r = await client.from("srs_cards").upsert(rows.slice(i, i + 500), { onConflict: "user_id,character" });
-          if (r.error) throw r.error;
-        }
-      }
-    }
-    if (full || SYNC.dirtyDays.size) {
-      const rows = dayRows(dayList);
-      if (rows.length) {
-        const r = await client.from("study_days").upsert(rows, { onConflict: "user_id,day" });
-        if (r.error) throw r.error;
-      }
-    }
-    if (full || SYNC.dirty) {
-      const r = await client.from("profiles").upsert(profileRow(), { onConflict: "id" });
-      if (r.error) throw r.error;
-    }
-    if (SYNC.quizQueue.length) {
-      const rows = SYNC.quizQueue.splice(0, SYNC.quizQueue.length);
-      const r = await client.from("quiz_scores").insert(rows);
-      if (r.error) { SYNC.quizQueue.unshift(...rows); throw r.error; }
-    }
-    if (full || SYNC.dirtyCustom) {
-      const words = JSON.parse(localStorage.getItem("kanji-custom") || "[]");
-      if (words.length) {
-        const r = await client.from("custom_words").upsert(words.map(w => ({
-          user_id: supaUser.id, word: w.word, reading: w.reading || "",
-          meaning: w.meaning || "", parts: w.parts || "",
-        })), { onConflict: "user_id,word" });
-        if (r.error) throw r.error;
-      }
-    }
+    const res = await apiPush(payload);
+    // Cleared only once the server has accepted them — a failed push leaves the
+    // queue intact so the attempt isn't silently lost.
+    SYNC.quizQueue.length = 0;
+    SYNC.stats = res?.stats || null;
     SYNC.dirty = false;
     SYNC.dirtySrs.clear();
     SYNC.dirtyDays.clear();
@@ -1865,34 +1855,34 @@ async function pushRows(client, full) {
 }
 
 // ---------- pull ----------
+// One request. The merge rules below are unchanged from when each table was
+// queried separately — see architecture.html for the contract they honour.
 async function pullCloud() {
-  const client = await supaClient();
-  if (!client || !supaUser) return false;
+  if (!supaUser) return false;
+  let cloud;
   try {
-    const uid = supaUser.id;
-    const [settings, cards, days, words, bestRow, quizCount, prof] = await Promise.all([
-      client.from("study_settings").select("level,goal,scope,updated_at").eq("user_id", uid).maybeSingle(),
-      client.from("srs_cards").select("character,level,reps,lapses,ease,interval,due").eq("user_id", uid),
-      client.from("study_days").select("day,new_chars,graded").eq("user_id", uid),
-      client.from("custom_words").select("word,reading,meaning,parts").eq("user_id", uid),
-      client.from("quiz_scores").select("mode,scope,learned,score,total,pct").eq("user_id", uid).order("created_at", { ascending: false }).limit(1),
-      client.from("quiz_scores").select("id", { count: "exact", head: true }).eq("user_id", uid),
-      client.from("profiles").select("streak,longest_streak,last_active").eq("id", uid).maybeSingle(),
-    ]);
-    for (const r of [settings, cards, days, words, bestRow, prof]) if (r.error) throw r.error;
-    if (quizCount.count != null) SYNC.quizTotal = quizCount.count;
+    cloud = await apiPull();
+  } catch (err) {
+    console.warn("pull failed:", err?.message || err);
+    SYNC.lastError = err?.message || String(err);
+    return false;
+  }
+  try {
+    const settings = cloud.settings;
+    const prof = cloud.profile;
+    SYNC.quizTotal = cloud.quiz_total ?? 0;
+    SYNC.stats = prof || SYNC.stats;
 
     // settings — last device to change them wins (stamp is set when the user changes a setting)
-    if (settings.data && (settings.data.updated_at || "") > (daily.settingsUpdatedAt || "")) {
-      const s = settings.data;
-      daily.settings.level = LEVELS.includes(s.level) ? s.level : daily.settings.level;
-      daily.settings.goal = Math.min(20, Math.max(3, s.goal || 5));
-      const scope = (s.scope || []).filter(l => LEVELS.includes(l));
+    if (settings && (settings.updated_at || "") > (daily.settingsUpdatedAt || "")) {
+      daily.settings.level = LEVELS.includes(settings.level) ? settings.level : daily.settings.level;
+      daily.settings.goal = Math.min(20, Math.max(3, settings.goal || 5));
+      const scope = (settings.scope || []).filter(l => LEVELS.includes(l));
       if (scope.length) daily.settings.scope = scope;
     }
 
     // SRS cards — never regress: a card with more reviews on another device wins
-    for (const c of cards.data || []) {
+    for (const c of cloud.srs || []) {
       const remote = { reps: c.reps || 0, lapses: c.lapses || 0, ease: c.ease ?? 2.5, interval: c.interval || 0, due: c.due };
       const mine = daily.srs[c.character];
       if (!mine) { daily.srs[c.character] = remote; continue; }
@@ -1900,7 +1890,7 @@ async function pullCloud() {
     }
 
     // days — union, so one device can never erase another device's grades
-    for (const row of days.data || []) {
+    for (const row of cloud.days || []) {
       const mine = daily.days[row.day];
       if (!mine) {
         daily.days[row.day] = { newChars: [...(row.new_chars || [])], graded: { ...(row.graded || {}) } };
@@ -1910,19 +1900,19 @@ async function pullCloud() {
       }
     }
 
-    // streak belongs to whoever was last active
-    if (prof.data?.last_active && (!daily.lastActive || prof.data.last_active > daily.lastActive)) {
-      daily.streak = prof.data.streak || 0;
-      daily.lastActive = prof.data.last_active;
+    // streak belongs to whoever was last active. The server counts only days with a
+    // real grade, so simply opening the app never earns a day.
+    if (prof?.last_active && (!daily.lastActive || prof.last_active > daily.lastActive)) {
+      daily.streak = prof.streak || 0;
+      daily.lastActive = prof.last_active;
     }
-    if (prof.data?.longest_streak) SYNC.peakStreak = Math.max(SYNC.peakStreak || 0, prof.data.longest_streak);
 
     // custom words — insert-only, keyed by word
     try {
       const local = JSON.parse(localStorage.getItem("kanji-custom") || "[]");
       const seen = new Set(local.map(w => w.word));
       let added = false;
-      for (const w of words.data || []) {
+      for (const w of cloud.custom_words || []) {
         if (!w.word || seen.has(w.word)) continue;
         local.push({ word: w.word, reading: w.reading || "", meaning: w.meaning || "", parts: w.parts || "" });
         seen.add(w.word);
@@ -1934,7 +1924,7 @@ async function pullCloud() {
     // best % per quiz scope — keep the better of local / cloud
     try {
       const best = JSON.parse(localStorage.getItem("kanji-best") || "{}");
-      const s = (bestRow.data || [])[0];
+      const s = cloud.recent_quiz;
       if (s) {
         const key = (s.scope || []).join("+") + (s.learned ? "+learned" : "");
         if (key && (!best[key] || (s.pct || 0) > parseInt(best[key]))) best[key] = (s.pct || 0) + "%";
@@ -1947,7 +1937,7 @@ async function pullCloud() {
     SYNC.lastPullAt = Date.now();
     return true;
   } catch (err) {
-    console.warn("pull failed:", err?.message || err);
+    console.warn("pull merge failed:", err?.message || err);
     SYNC.lastError = err?.message || String(err);
     return false;
   }
@@ -2002,16 +1992,25 @@ function acctMsg(text, kind) {
 }
 
 function paintAcctStats() {
-  const graded = Object.keys(daily.srs || {}).length;
-  const reviewed = Object.values(daily.srs || {}).reduce((a, e) => a + (e.reps || 0), 0);
+  // Signed in: show what the server computed. It has the full picture across
+  // devices and can't be inflated by editing localStorage. Signed out: fall back
+  // to local counts so the panel still reads sensibly before you sign in.
+  const local = {
+    graded: Object.keys(daily.srs || {}).length,
+    reviewed: Object.values(daily.srs || {}).reduce((a, e) => a + (e.reps || 0), 0),
+    days: Object.keys(daily.days || {}).length,
+  };
+  const stats = SYNC.stats || {};
+  const graded = stats.kanji_graded ?? local.graded;
+  const xp = stats.xp ?? (local.graded * 50 + local.reviewed * 10);
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   set("acct-email-label", supaUser?.email || "Signed in");
   set("acct-level", daily.settings.level);
-  set("acct-streak", daily.streak || 0);
+  set("acct-streak", stats.streak ?? daily.streak ?? 0);
   set("acct-graded", graded);
-  set("acct-xp", (graded * 50 + reviewed * 10).toLocaleString());
+  set("acct-xp", xp.toLocaleString());
   set("acct-last", SYNC.lastAt ? ago(SYNC.lastAt) : "—");
-  set("acct-days", Object.keys(daily.days || {}).length);
+  set("acct-days", stats.days_active ?? local.days);
   set("acct-quizzes", SYNC.quizTotal ?? "0");
 }
 
@@ -2102,18 +2101,24 @@ async function acctSubmit(mode) {
 }
 
 // a failed sync is almost never "no internet" — name the actual reason so the
-// learner knows whether to retry, fix their connection, or run the schema
+// learner knows whether to retry, fix their connection, or ask for help
 function syncErrorText() {
   const e = (SYNC.lastError || "").toLowerCase();
   if (!e) return "Couldn't reach the server — your local progress is safe, try again in a moment.";
-  if (e.includes("schema cache") || e.includes("does not exist") || e.includes("pgrst205") || e.includes("42p01"))
-    return "The cloud tables are missing. Run supabase-schema.sql once in Supabase → SQL Editor, then sync again.";
-  if (e.includes("jwt") || e.includes("token") || e.includes("session") || e.includes("auth"))
+  if (e.includes("no connection") || e.includes("network") || e.includes("fetch"))
+    return "No connection to the sync server — check your internet and try again. Local progress is safe.";
+  if (e.includes("sign in") || e.includes("expired") || e.includes("session") || e.includes("401"))
     return "Your session expired. Sign out, sign back in, then sync.";
-  if (e.includes("fetch") || e.includes("network") || e.includes("failed to fetch"))
-    return "No connection to Supabase — check your internet and try again. Local progress is safe.";
-  if (e.includes("row-level") || e.includes("rls") || e.includes("permission"))
-    return "The database refused that request. Check the row-level security policies in supabase-schema.sql.";
+  if (e.includes("sign-in service") || e.includes("reach the sign-in"))
+    return "The server can't reach the sign-in service. Try again in a moment.";
+  if (e.includes("misconfigured"))
+    return "The server's database credentials are wrong — it needs fixing, not retrying.";
+  if (e.includes("schema") || e.includes("does not exist") || e.includes("pgrst") || e.includes("42p01"))
+    return "The cloud tables are missing. Run supabase-schema.sql once in Supabase → SQL Editor, then sync again.";
+  if (e.includes("unprocessable") || e.includes("422"))
+    return "This device sent something the server wouldn't accept. Try a full sync, and tell us if it keeps failing.";
+  if (e.includes("429") || e.includes("too much data") || e.includes("smaller sync"))
+    return "That was a lot at once. Give it a moment and sync again.";
   return `Sync failed: ${SYNC.lastError}`;
 }
 
@@ -2146,6 +2151,10 @@ document.getElementById("acct-logout").onclick = async () => {
   SYNC.dirty = false;
   SYNC.dirtySrs.clear();
   SYNC.dirtyDays.clear();
+  // Server-computed totals belong to the account we're leaving; drop them so the
+  // panel falls back to this device's numbers.
+  SYNC.stats = null;
+  SYNC.quizQueue.length = 0;
   setSync("local");
   paintAcct();
   closeAcct();
@@ -2170,5 +2179,6 @@ document.addEventListener("visibilitychange", () => {
 paintIcons();
 loadData().catch(err => {
   document.getElementById("lib-stats").textContent =
-    "Failed to load data. Run via a local server (python -m http.server), not file://. " + err;
+    "Failed to load the kanji data. Serve this over http:// from the project root " +
+    "(cd server && uvicorn app.main:app, or python -m http.server) rather than opening the file directly. " + err;
 });

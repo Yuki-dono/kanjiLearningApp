@@ -93,9 +93,9 @@
   <div class="arch-top">
     <div>
       <h1>Systems &amp; data storage</h1>
-      <p>KanjiLearn is a local-first static site: no server, no build step. Everything the learner does is
-         written to this device first, then mirrored to their Supabase account so progress follows them
-         between phone, tablet and PC.</p>
+      <p>KanjiLearn is a local-first site: everything the learner does is written to this device first,
+         then mirrored to their account through our own API so progress follows them between phone, tablet
+         and PC. Supabase authenticates; <span class="kbd k">server/app</span> owns the data.</p>
     </div>
     <button class="btn" id="theme" type="button">◐ Theme</button>
   </div>
@@ -278,7 +278,7 @@
           <td><span class="kbd k">kanji-daily-v2</span> · streak</td>
           <td>streak, lastActive</td>
           <td class="tbl-name">profiles</td>
-          <td>Recomputed from scratch on every push; the most recent <code>last_active</code> wins.</td>
+          <td>Recomputed <b>on the server</b> from the rows below — the browser no longer reports XP or streak.</td>
         </tr>
         <tr>
           <td><span class="kbd k">kanji-best</span></td>
@@ -331,18 +331,19 @@
     <!-- ============================ GUARANTEES ============================ -->
     <div class="arch-card">
       <h2>Privacy &amp; safety rails</h2>
-      <p class="sub">Set once in <span class="kbd k">supabase-schema.sql</span>, re-runnable at any time.</p>
+      <p class="sub">Two layers: database constraints in <span class="kbd k">supabase-schema.sql</span>, and request scoping in <span class="kbd k">server/app</span>.</p>
       <ul class="rule-list">
-        <li><span class="n">A</span><span><b>RLS on all six tables.</b> Reads and writes are filtered to <code>auth.uid()</code>, so an account can only ever see its own rows.</span></li>
-        <li><span class="n">B</span><span><b>No server, no tracking.</b> The site is static files on a CDN; there is no backend to leak anything.</span></li>
-        <li><span class="n">C</span><span><b>The anon key is public.</b> It identifies the project only. RLS is the actual lock, which is why the key is safe in the source.</span></li>
-        <li><span class="n">D</span><span><b>Cascade deletes.</b> Deleting the account in Supabase removes every study table automatically.</span></li>
-        <li><span class="n">E</span><span><b>Export / import.</b> A JSON backup of all three local keys can be downloaded and restored.</span></li>
+        <li><span class="n">A</span><span><b>RLS on all six tables.</b> Reads and writes are filtered to <code>auth.uid()</code>. Defence in depth — the API never relies on it, but it stays on.</span></li>
+        <li><span class="n">B</span><span><b>Every request scoped server-side.</b> The API verifies the access token against Supabase's signing keys and reads the account from the token alone. A <code>user_id</code> in a request body is ignored and overwritten.</span></li>
+        <li><span class="n">C</span><span><b>The service_role key never ships.</b> It bypasses RLS and lives only in <span class="kbd k">server/.env</span>. The browser only ever holds the public anon key, which is used to sign in and nothing else.</span></li>
+        <li><span class="n">D</span><span><b>Totals are computed, not reported.</b> XP and streak are derived from the study rows on the server, so editing localStorage can't inflate them.</span></li>
+        <li><span class="n">E</span><span><b>Cascade deletes.</b> Deleting the account in Supabase removes every study table automatically.</span></li>
+        <li><span class="n">F</span><span><b>Export / import.</b> A JSON backup of all three local keys can be downloaded and restored.</span></li>
       </ul>
     </div>
   </div>
 
-  <p class="arch-foot">Reflects <span class="kbd k">app.js</span> (sync + SRS sections), <span class="kbd k">supabase-schema.sql</span> and <span class="kbd k">data/</span>. Regenerate if the schema changes.</p>
+  <p class="arch-foot">Reflects <span class="kbd k">app.js</span> (sync + SRS sections), <span class="kbd k">server/app</span>, <span class="kbd k">supabase-schema.sql</span> and <span class="kbd k">data/</span>. Regenerate if the schema changes.</p>
 </div>
 
 <script>

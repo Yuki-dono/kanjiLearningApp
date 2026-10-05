@@ -1,2 +1,10 @@
-Thumbs.db
-.DS_Store
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets — the service_role key lives here and must never be committed.
+# Copy this file to .env and fill it in.
+server/.env
