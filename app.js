@@ -1650,6 +1650,7 @@ const SYNC_TEXT = {
   syncing: "Syncing…",
   ready: "Synced",
   error: "Sync failed — retry",
+  nobackend: "No sync server",
 };
 
 function setSync(status) {
@@ -1662,8 +1663,8 @@ function setSync(status) {
   if (txt) txt.textContent = status === "ready" && SYNC.lastAt ? `Synced ${ago(SYNC.lastAt)}` : SYNC_TEXT[status];
   const chip = document.getElementById("acct-sync-chip");
   if (chip) {
-    chip.className = "chip " + (status === "error" ? "chip-quiet" : status === "ready" ? "chip-green" : "chip-brand");
-    chip.textContent = { syncing: "↻ Syncing…", ready: "● Synced", error: "⚠ Sync error", local: "● Local only" }[status];
+    chip.className = "chip " + (status === "error" || status === "nobackend" ? "chip-quiet" : status === "ready" ? "chip-green" : "chip-brand");
+    chip.textContent = { syncing: "↻ Syncing…", ready: "● Synced", error: "⚠ Sync error", nobackend: "⚠ No server", local: "● Local only" }[status];
   }
   if (status === "ready") paintAcctStats();
 }
@@ -1943,6 +1944,14 @@ async function pullCloud() {
   }
 }
 
+// A failed sync is only "nobackend" when the request never reached a route. Any
+// other failure is an ordinary error, and one worth retrying.
+function syncFailedStatus() {
+  const e = (SYNC.lastError || "").toLowerCase();
+  if (e.includes("no sync server") || e.includes("404")) return "nobackend";
+  return SYNC.dirty ? "error" : "ready";
+}
+
 // ---------- orchestration ----------
 async function syncNow(opts = {}) {
   if (!supaUser) return false;
@@ -1953,7 +1962,7 @@ async function syncNow(opts = {}) {
     const ok = await pullCloud();
     const pushed = await pushCloud(!!opts.forceFull);
     if (pushed) setSync("ready");
-    else if (!opts.quiet) setSync(SYNC.dirty ? "error" : "ready");
+    else if (!opts.quiet) setSync(syncFailedStatus());
     return ok && pushed;
   } finally {
     SYNC.inFlight = false;
@@ -1964,14 +1973,21 @@ let supaBooting = false;
 async function supaInit() {
   if (supaBooting) return;
   supaBooting = true;
+  // Ask the backend if it's there before trying to sync. Skipping this means the
+  // first clue is a sync failing with a bare 404, which reads like an app bug
+  // rather than "you opened the static site instead of the server".
+  const reachable = await apiHealth();
   const client = await supaClient();
   if (!client) { supaBooting = false; setSync("error"); return; }
   try {
     const { data: { session } } = await client.auth.getSession();
     supaUser = session?.user || null;
-    if (supaUser) {
+    if (supaUser && reachable) {
       await syncNow({ quiet: true, forceFull: true });
       setSync("ready");
+    } else if (supaUser) {
+      // Signed in and working locally, but there's nothing to sync with.
+      setSync("nobackend");
     } else {
       setSync("local");
     }
@@ -2086,10 +2102,12 @@ async function acctSubmit(mode) {
     }
 
     paintAcct();
-    await syncNow({ quiet: true, forceFull: true });
-    setSync("ready");
+    const ok = await syncNow({ quiet: true, forceFull: true });
+    // Don't claim success just because signing in worked — the sync is a
+    // separate step and can fail on its own.
+    setSync(ok ? "ready" : syncFailedStatus());
     paintAcct();
-    acctMsg("");
+    acctMsg(ok ? "" : syncErrorText(), ok ? "" : "no");
   } catch (err) {
     const raw = err?.message || String(err);
     acctMsg(/invalid login/i.test(raw) ? "That email and password don't match."
@@ -2102,8 +2120,19 @@ async function acctSubmit(mode) {
 
 // a failed sync is almost never "no internet" — name the actual reason so the
 // learner knows whether to retry, fix their connection, or ask for help
+// Said whenever the page is served by something that isn't the API — a static
+// host, or opening index.html from disk. Kept in one place because it's the
+// single most confusing failure this setup can produce.
+const NO_SERVER_HELP =
+  "No sync server at this address. Open http://localhost:8000 — that's the API server, " +
+  "which serves the site too. If you host the site separately, set API_BASE in config.js to the server's URL.";
+
 function syncErrorText() {
   const e = (SYNC.lastError || "").toLowerCase();
+  // Most specific first. A 404 that arrives without a JSON body never matched
+  // a route, which means the page is being served by something other than the
+  // API — worth naming outright rather than reporting as a generic failure.
+  if (e.includes("no sync server") || e.includes("404")) return NO_SERVER_HELP;
   if (!e) return "Couldn't reach the server — your local progress is safe, try again in a moment.";
   if (e.includes("no connection") || e.includes("network") || e.includes("fetch"))
     return "No connection to the sync server — check your internet and try again. Local progress is safe.";
@@ -2113,6 +2142,8 @@ function syncErrorText() {
     return "The server can't reach the sign-in service. Try again in a moment.";
   if (e.includes("misconfigured"))
     return "The server's database credentials are wrong — it needs fixing, not retrying.";
+  if (e.includes("not found"))
+    return "The database rejected that row. Check the tables in supabase-schema.sql still exist.";
   if (e.includes("schema") || e.includes("does not exist") || e.includes("pgrst") || e.includes("42p01"))
     return "The cloud tables are missing. Run supabase-schema.sql once in Supabase → SQL Editor, then sync again.";
   if (e.includes("unprocessable") || e.includes("422"))
@@ -2139,6 +2170,14 @@ document.getElementById("acct-pass-eye").onclick = () => {
   document.getElementById("acct-pass-eye").textContent = show ? "hide" : "show";
 };
 document.getElementById("sync-now").onclick = async () => {
+  acctMsg("Checking the server…", "busy");
+  // Re-probe rather than assuming: the common fix is "start the server", and
+  // this is where someone would do that.
+  if (!await apiHealth()) {
+    setSync("nobackend");
+    acctMsg(NO_SERVER_HELP, "no");
+    return;
+  }
   acctMsg("Syncing…", "busy");
   const ok = await syncNow({ forceFull: true });
   acctMsg(ok ? "Up to date ✅" : syncErrorText(), ok ? "ok" : "no");

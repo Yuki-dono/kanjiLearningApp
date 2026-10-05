@@ -23,6 +23,24 @@ cd server
 
 Must use http:// (not file://) because the app fetches the kanji and vocabulary JSON.
 
+### Sync fails with "No sync server at this address" / a 404
+
+You opened the site somewhere the API doesn't live. Sync needs the FastAPI server,
+so open **http://localhost:8000** — not a static host.
+
+GitHub Pages, Netlify, `file://` and `python -m http.server` all serve the files
+but have no `/api/*`, so every sync 404s. Everything else still works, which is
+what makes it confusing: the app loads (content falls back to `data/`), sign-in
+works (Supabase is external), and only sync breaks.
+
+Two ways out:
+
+1. **Use the API server** — `cd server && uvicorn app.main:app --port 8000`, then open `http://localhost:8000`. One origin, no CORS.
+2. **Host them separately** — deploy the API, then set `API_BASE` in `config.js` to its URL and `CORS_ORIGINS` in `server/.env` to the origin serving the page. The account panel will say `⚠ No server` if the two don't line up.
+
+The sidebar chip and account panel both report which server is reachable, so this
+is visible without attempting a sync.
+
 Working offline or just browsing without sync? `python -m http.server 8000` still
 works — sign-in and cloud sync are disabled, everything else behaves the same.
 

@@ -11,8 +11,16 @@ window.KANJI_CONFIG = {
   SUPABASE_URL: "https://qkcquwbmmqgbvximphbz.supabase.co",
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrY3F1d2JtbXFnYnZ4aW1waGJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NDE1MjgsImV4cCI6MjEwNjQxNzUyOH0.qmt84ec7PIEEiE_su_rU70apUkb2oYJ3uRIDaSM8c00",
 
-  // Same-origin by default: the FastAPI server serves this site too, so there is
-  // no CORS and no second host to keep in sync. Set to e.g. "http://localhost:8000"
-  // only when you serve the static files from somewhere else.
+  // Where our API lives.
+  //
+  // "" means same origin, and that's correct whenever you open the site from the
+  // API server itself (http://localhost:8000) — the server serves these files, so
+  // there is one origin and no CORS.
+  //
+  // If you open the site some other way (GitHub Pages, file://, any static host)
+  // then /api/* hits that host instead and every sync fails with a 404. Two ways
+  // out: open http://localhost:8000 instead, or point this at the server, e.g.
+  //   API_BASE: "https://kanji-api.example.com",
+  // and set CORS_ORIGINS in server/.env to the origin that hosts the page.
   API_BASE: "",
 };
