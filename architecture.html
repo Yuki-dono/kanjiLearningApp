@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KanjiLearn — systems &amp; data storage</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  body { padding: 0 0 60px; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 22px; }
+
+  .arch-top {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 18px; flex-wrap: wrap; margin: 30px 0 4px;
+  }
+  .arch-top h1 { font-size: 24px; }
+  .arch-top p { color: var(--ink-2); font-size: 13px; margin-top: 5px; max-width: 68ch; }
+
+  .arch-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-2);
+    padding: 16px 18px;
+    margin: 18px 0;
+  }
+  .arch-card > h2 {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 15px; margin-bottom: 4px;
+  }
+  .arch-card > .sub { font-size: 12.5px; color: var(--ink-2); margin-bottom: 14px; }
+
+  /* ---------- the diagram ---------- */
+  .svg-scroll { overflow-x: auto; padding-bottom: 4px; }
+  svg.arch { display: block; width: 100%; min-width: 1040px; height: auto; }
+  svg.arch text { font-family: var(--sans); }
+  .t-cap   { font-size: 10.5px; fill: var(--muted); font-weight: 500; }
+  .t-name  { font-size: 12px;   fill: var(--ink); font-weight: 700; }
+  .t-sub   { font-size: 10.5px; fill: var(--ink-2); }
+  .t-hd    { font-size: 10px;   fill: var(--muted); font-weight: 800; letter-spacing: .1em; }
+  .t-arrow { font-size: 10px;   fill: var(--brand); font-weight: 800; letter-spacing: .06em; }
+  .t-albl  { font-size: 10.5px; fill: var(--muted); font-weight: 600; }
+  .box      { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+  .box-in   { fill: var(--surface);   stroke: var(--line); stroke-width: 1; }
+  .box-brand{ fill: var(--brand-soft); stroke: var(--brand-line); stroke-width: 1; }
+  .box-dark { fill: var(--surface-3); stroke: var(--line-2); stroke-width: 1; }
+  .rule     { stroke: var(--line); stroke-width: 1; }
+  .link     { stroke: var(--brand); stroke-width: 1.8; fill: none; }
+  .link-calm{ stroke: var(--line-2); stroke-width: 1.8; fill: none; }
+
+  /* ---------- mapping table ---------- */
+  table.map { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.map th {
+    text-align: left; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 800; padding: 0 10px 8px 0; border-bottom: 1px solid var(--line);
+  }
+  table.map td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  table.map tr:last-child td { border-bottom: 0; }
+  table.map td:first-child { white-space: nowrap; }
+  kbd.k {
+    display: inline-block; font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 11px; background: var(--surface-3); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 6px; color: var(--ink);
+  }
+  .tbl-name { color: var(--brand); font-weight: 600; white-space: nowrap; }
+  .none { color: var(--muted); }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .rule-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+  .rule-list li { display: flex; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
+  .rule-list b { color: var(--ink); }
+  .rule-list .n {
+    flex-shrink: 0; width: 20px; height: 20px; border-radius: 6px; margin-top: 1px;
+    display: grid; place-items: center; font-size: 10px; font-weight: 800;
+    background: var(--brand-soft); color: var(--brand);
+  }
+  .trig { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .trig span {
+    font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: var(--r-pill);
+    background: var(--surface-3); color: var(--ink-2);
+  }
+  .note {
+    font-size: 12px; color: var(--ink-2); background: var(--amber-soft);
+    border: 1px solid var(--amber-line); border-radius: var(--r-sm); padding: 9px 12px; margin-top: 14px;
+  }
+  .arch-foot { font-size: 12px; color: var(--muted); margin-top: 22px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="arch-top">
+    <div>
+      <h1>Systems &amp; data storage</h1>
+      <p>KanjiLearn is a local-first static site: no server, no build step. Everything the learner does is
+         written to this device first, then mirrored to their Supabase account so progress follows them
+         between phone, tablet and PC.</p>
+    </div>
+    <button class="btn" id="theme" type="button">◐ Theme</button>
+  </div>
+
+  <!-- ============================ DIAGRAM ============================ -->
+  <div class="arch-card">
+    <svg class="arch" viewBox="0 0 1200 700" role="img"
+         aria-label="Architecture: static JSON data feeds the browser app, the app reads and writes localStorage, and syncs with six Supabase tables locked by row-level security.">
+
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--brand)" />
+        </marker>
+        <marker id="ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line-2)" />
+        </marker>
+      </defs>
+
+      <!-- column captions -->
+      <text class="t-hd" x="16"   y="24">STATIC CONTENT</text>
+      <text class="t-hd" x="330"  y="24">BROWSER APP — index.html + app.js</text>
+      <text class="t-hd" x="770"  y="24">SUPABASE PROJECT</text>
+
+      <!-- ============ 1. static datasets ============ -->
+      <rect class="box" x="16" y="38" width="250" height="216" rx="14" />
+      <rect class="box-in" x="34" y="66" width="214" height="88" rx="10" />
+      <text class="t-name" x="48" y="90">data/kanji-n5…n1.json</text>
+      <text class="t-sub"  x="48" y="108">5 files · ~640 KB</text>
+      <text class="t-cap"  x="48" y="126">character · meanings · onyomi</text>
+      <text class="t-cap"  x="48" y="141">kunyomi · strokes · level</text>
+
+      <rect class="box-in" x="34" y="162" width="214" height="72" rx="10" />
+      <text class="t-name" x="48" y="186">data/vocab-n5…n1.json</text>
+      <text class="t-sub"  x="48" y="204">5 files · ~3.1 MB</text>
+      <text class="t-cap"  x="48" y="222">word · reading · meanings · parts</text>
+
+      <text class="t-cap" x="16" y="278">Read-only. Shipped with the site,</text>
+      <text class="t-cap" x="16" y="293">then browser-cached — never uploaded.</text>
+
+      <!-- ============ 2. the app ============ -->
+      <rect class="box-brand" x="330" y="38" width="360" height="448" rx="14" />
+      <rect class="box-in" x="348" y="66" width="324" height="46" rx="10" />
+      <text class="t-name" x="362" y="86">① Daily</text>
+      <text class="t-sub"  x="362" y="103">builds today's queue: new kanji + reviews due</text>
+
+      <rect class="box-in" x="348" y="120" width="324" height="46" rx="10" />
+      <text class="t-name" x="362" y="140">② Library</text>
+      <text class="t-sub"  x="362" y="157">browse, filter and search every level</text>
+
+      <rect class="box-in" x="348" y="174" width="324" height="46" rx="10" />
+      <text class="t-name" x="362" y="194">③ Test</text>
+      <text class="t-sub"  x="362" y="211">quiz — the result is queued for upload</text>
+
+      <rect class="box-in" x="348" y="228" width="324" height="46" rx="10" />
+      <text class="t-name" x="362" y="248">④ Compounds</text>
+      <text class="t-sub"  x="362" y="265">word breakdowns, furigana toggle</text>
+
+      <rect class="box-dark" x="348" y="288" width="324" height="80" rx="10" />
+      <text class="t-name" x="362" y="310">SRS scheduler</text>
+      <text class="t-sub"  x="362" y="330">daily.srs[字] = { reps, lapses, ease,</text>
+      <text class="t-sub"  x="362" y="346">interval, due } — graded per answer,</text>
+      <text class="t-sub"  x="362" y="362">schedules the next review date</text>
+
+      <rect class="box-dark" x="348" y="380" width="324" height="92" rx="10" />
+      <text class="t-name" x="362" y="402">Sync engine</text>
+      <text class="t-sub"  x="362" y="422">pull → merge → push</text>
+      <text class="t-cap"  x="362" y="440">only the pieces that changed are shipped;</text>
+      <text class="t-cap"  x="362" y="456">sign-in and Reset force a full sync</text>
+
+      <!-- ============ 3. local storage ============ -->
+      <rect class="box-dark" x="330" y="520" width="360" height="152" rx="14" />
+      <text class="t-name" x="348" y="544">localStorage — this device only</text>
+
+      <rect class="box-in" x="348" y="556" width="324" height="24" rx="7" />
+      <text class="t-cap" x="360" y="572">kanji-daily-v2 → settings · srs · days · streak</text>
+
+      <rect class="box-in" x="348" y="585" width="324" height="24" rx="7" />
+      <text class="t-cap" x="360" y="601">kanji-best → best score per quiz mode</text>
+
+      <rect class="box-in" x="348" y="614" width="324" height="24" rx="7" />
+      <text class="t-cap" x="360" y="630">kanji-custom → vocabulary you typed in</text>
+
+      <rect class="box-in" x="348" y="643" width="324" height="24" rx="7" />
+      <text class="t-cap" x="360" y="659">kanji-theme → light / dark</text>
+
+      <!-- ============ 4. supabase ============ -->
+      <rect class="box" x="770" y="38" width="414" height="634" rx="14" />
+
+      <rect class="box-brand" x="788" y="66" width="378" height="56" rx="10" />
+      <text class="t-name" x="802" y="88">auth.users</text>
+      <text class="t-sub"  x="802" y="106">email + password → an id, which is auth.uid()</text>
+
+      <rect class="box-in" x="788" y="132" width="378" height="56" rx="10" />
+      <text class="t-name" x="802" y="154">TRIGGER handle_new_user()</text>
+      <text class="t-sub"  x="802" y="172">fires on sign-up, inserts the two rows below</text>
+
+      <rect class="box-in" x="788" y="198" width="378" height="52" rx="10" />
+      <text class="t-name" x="802" y="220">profiles</text>
+      <text class="t-sub"  x="802" y="238">1 row · level, xp, streak, kanji_graded, days_active</text>
+
+      <rect class="box-in" x="788" y="260" width="378" height="52" rx="10" />
+      <text class="t-name" x="802" y="282">study_settings</text>
+      <text class="t-sub"  x="802" y="300">1 row · level, goal, scope[]</text>
+
+      <rect class="box-in" x="788" y="322" width="378" height="52" rx="10" />
+      <text class="t-name" x="802" y="344">srs_cards</text>
+      <text class="t-sub"  x="802" y="362">1 row per kanji seen · key (user_id, character)</text>
+
+      <rect class="box-in" x="788" y="384" width="378" height="52" rx="10" />
+      <text class="t-name" x="802" y="406">study_days</text>
+      <text class="t-sub"  x="802" y="424">1 row per studied day · key (user_id, day)</text>
+
+      <rect class="box-in" x="788" y="446" width="378" height="52" rx="10" />
+      <text class="t-name" x="802" y="468">quiz_scores</text>
+      <text class="t-sub"  x="802" y="486">append-only · mode, score, total, pct, created_at</text>
+
+      <rect class="box-in" x="788" y="508" width="378" height="52" rx="10" />
+      <text class="t-name" x="802" y="530">custom_words</text>
+      <text class="t-sub"  x="802" y="548">unique (user_id, word) · word, reading, meaning</text>
+
+      <rect class="box-brand" x="788" y="574" width="378" height="82" rx="10" />
+      <text class="t-name" x="802" y="596">ROW-LEVEL SECURITY</text>
+      <text class="t-cap"  x="802" y="614">Every table is readable and writable only where</text>
+      <text class="t-cap"  x="802" y="630">auth.uid() = user_id. The anon key in app.js is a</text>
+      <text class="t-cap"  x="802" y="646">public client key — RLS is what keeps rows private.</text>
+
+      <!-- ============ connectors ============ -->
+      <!-- static -> app -->
+      <path class="link" d="M 266 138 L 322 138" marker-end="url(#ah)" />
+      <text class="t-arrow" x="266" y="130">FETCH</text>
+
+      <!-- app <-> localStorage -->
+      <path class="link-calm" d="M 470 486 L 470 514" marker-start="url(#ahc)" marker-end="url(#ahc)" />
+      <text class="t-albl" x="482" y="504">read + write on every change</text>
+
+      <!-- app <-> cloud -->
+      <path class="link" d="M 690 138 L 762 138" marker-start="url(#ah)" marker-end="url(#ah)" />
+      <text class="t-arrow" x="726" y="120" text-anchor="middle">PULL</text>
+      <text class="t-arrow" x="726" y="164" text-anchor="middle">PUSH</text>
+
+      <!-- cloud RLS side rail -->
+      <path class="rule" d="M 1184 66 L 1184 656" stroke-dasharray="3 4" />
+    </svg>
+  </div>
+
+  <!-- ============================ MAPPING ============================ -->
+  <div class="arch-card">
+    <h2>What lives where</h2>
+    <p class="sub">One row per concern. Everything below the line only exists once the learner signs in.</p>
+
+    <table class="map">
+      <thead>
+        <tr>
+          <th>Local key</th>
+          <th>Shape</th>
+          <th>Cloud table</th>
+          <th>How it merges</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="kbd k">kanji-daily-v2</span> · settings</td>
+          <td>level, goal, scope[]</td>
+          <td class="tbl-name">study_settings</td>
+          <td>Whole row, replaced on change — newest <code>updated_at</code> wins.</td>
+        </tr>
+        <tr>
+          <td><span class="kbd k">kanji-daily-v2</span> · srs</td>
+          <td>one entry per kanji: reps, lapses, ease, interval, due</td>
+          <td class="tbl-name">srs_cards</td>
+          <td>Per changed character, batched 500 at a time. <b>Never regresses</b> — the card with more reviews wins.</td>
+        </tr>
+        <tr>
+          <td><span class="kbd k">kanji-daily-v2</span> · days</td>
+          <td>per day: newChars[], graded{}</td>
+          <td class="tbl-name">study_days</td>
+          <td>Per changed day, <b>unioned</b> — another device can add grades but never erase yours.</td>
+        </tr>
+        <tr>
+          <td><span class="kbd k">kanji-daily-v2</span> · streak</td>
+          <td>streak, lastActive</td>
+          <td class="tbl-name">profiles</td>
+          <td>Recomputed from scratch on every push; the most recent <code>last_active</code> wins.</td>
+        </tr>
+        <tr>
+          <td><span class="kbd k">kanji-best</span></td>
+          <td>best percentage per quiz mode</td>
+          <td class="tbl-name">quiz_scores</td>
+          <td class="none">Local only. The account keeps the full history of every attempt instead.</td>
+        </tr>
+        <tr>
+          <td><span class="kbd k">kanji-custom</span></td>
+          <td>your own vocabulary entries</td>
+          <td class="tbl-name">custom_words</td>
+          <td>Upserted on <code>(user_id, word)</code> — same word updates, never duplicates.</td>
+        </tr>
+        <tr>
+          <td><span class="kbd k">kanji-theme</span></td>
+          <td>light / dark</td>
+          <td class="none">—</td>
+          <td class="none">Device preference. Deliberately never synced.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="note"><b>Reset</b> is honest about it: it clears localStorage <em>and</em> deletes this account's rows in
+      srs_cards, study_days, quiz_scores and custom_words, then zeroes the profile counters — so a second device
+      can't resurrect progress the learner asked to erase.</p>
+  </div>
+
+  <div class="cols">
+    <!-- ============================ SYNC ============================ -->
+    <div class="arch-card">
+      <h2>When a sync happens</h2>
+      <p class="sub">Pull always runs before push, so a device merges before it writes.</p>
+      <div class="trig">
+        <span>5s after any change</span>
+        <span>every 2 min if dirty</span>
+        <span>tab regains focus</span>
+        <span>browser back online</span>
+        <span>sign-in / app boot (full)</span>
+        <span>leaving the page</span>
+      </div>
+      <ul class="rule-list" style="margin-top:16px">
+        <li><span class="n">1</span><span><b>Boot.</b> The ten JSON files load in parallel into memory; nothing is written.</span></li>
+        <li><span class="n">2</span><span><b>Study.</b> Every grade updates <code>daily.srs</code>, saves to localStorage and marks that character dirty.</span></li>
+        <li><span class="n">3</span><span><b>Pull.</b> Six tables are read in parallel and merged into local state.</span></li>
+        <li><span class="n">4</span><span><b>Push.</b> Only dirty pieces are upserted; quiz results are inserted from a queue.</span></li>
+        <li><span class="n">5</span><span><b>Offline?</b> The app never blocks — it keeps working and the dirty flags wait for the next attempt.</span></li>
+      </ul>
+    </div>
+
+    <!-- ============================ GUARANTEES ============================ -->
+    <div class="arch-card">
+      <h2>Privacy &amp; safety rails</h2>
+      <p class="sub">Set once in <span class="kbd k">supabase-schema.sql</span>, re-runnable at any time.</p>
+      <ul class="rule-list">
+        <li><span class="n">A</span><span><b>RLS on all six tables.</b> Reads and writes are filtered to <code>auth.uid()</code>, so an account can only ever see its own rows.</span></li>
+        <li><span class="n">B</span><span><b>No server, no tracking.</b> The site is static files on a CDN; there is no backend to leak anything.</span></li>
+        <li><span class="n">C</span><span><b>The anon key is public.</b> It identifies the project only. RLS is the actual lock, which is why the key is safe in the source.</span></li>
+        <li><span class="n">D</span><span><b>Cascade deletes.</b> Deleting the account in Supabase removes every study table automatically.</span></li>
+        <li><span class="n">E</span><span><b>Export / import.</b> A JSON backup of all three local keys can be downloaded and restored.</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="arch-foot">Reflects <span class="kbd k">app.js</span> (sync + SRS sections), <span class="kbd k">supabase-schema.sql</span> and <span class="kbd k">data/</span>. Regenerate if the schema changes.</p>
+</div>
+
+<script>
+  var root = document.documentElement;
+  var KEY = "kanji-theme";
+  function paint() {
+    var saved = null;
+    try { saved = localStorage.getItem(KEY); } catch (e) {}
+    var dark = saved ? saved === "dark"
+                       : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.classList.toggle("dark", dark);
+  }
+  paint();
+  document.getElementById("theme").addEventListener("click", function () {
+    var dark = !root.classList.contains("dark");
+    root.classList.toggle("dark", dark);
+    try { localStorage.setItem(KEY, dark ? "dark" : "light"); } catch (e) {}
+  });
+</script>
+</body>
+</html>

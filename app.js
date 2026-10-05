@@ -1614,6 +1614,7 @@ const SYNC = {
   quizQueue: [],        // quiz results not yet uploaded
   lastAt: null,         // last successful sync (ISO)
   lastPullAt: 0,
+  lastError: null,       // why the last sync failed, so the UI can say something useful
   inFlight: false,
   pushing: false,
 };
@@ -1854,9 +1855,11 @@ async function pushRows(client, full) {
     SYNC.dirtyCustom = false;
     SYNC.forceFull = false;
     SYNC.lastAt = stamp;
+    SYNC.lastError = null;
     return true;
   } catch (err) {
     console.warn("push failed:", err?.message || err);
+    SYNC.lastError = err?.message || String(err);
     return false;
   }
 }
@@ -1945,6 +1948,7 @@ async function pullCloud() {
     return true;
   } catch (err) {
     console.warn("pull failed:", err?.message || err);
+    SYNC.lastError = err?.message || String(err);
     return false;
   }
 }
@@ -2097,6 +2101,22 @@ async function acctSubmit(mode) {
   }
 }
 
+// a failed sync is almost never "no internet" — name the actual reason so the
+// learner knows whether to retry, fix their connection, or run the schema
+function syncErrorText() {
+  const e = (SYNC.lastError || "").toLowerCase();
+  if (!e) return "Couldn't reach the server — your local progress is safe, try again in a moment.";
+  if (e.includes("schema cache") || e.includes("does not exist") || e.includes("pgrst205") || e.includes("42p01"))
+    return "The cloud tables are missing. Run supabase-schema.sql once in Supabase → SQL Editor, then sync again.";
+  if (e.includes("jwt") || e.includes("token") || e.includes("session") || e.includes("auth"))
+    return "Your session expired. Sign out, sign back in, then sync.";
+  if (e.includes("fetch") || e.includes("network") || e.includes("failed to fetch"))
+    return "No connection to Supabase — check your internet and try again. Local progress is safe.";
+  if (e.includes("row-level") || e.includes("rls") || e.includes("permission"))
+    return "The database refused that request. Check the row-level security policies in supabase-schema.sql.";
+  return `Sync failed: ${SYNC.lastError}`;
+}
+
 // ---------- wiring ----------
 const acctModal = document.getElementById("acct-modal");
 document.getElementById("acct-close").onclick = closeAcct;
@@ -2116,7 +2136,7 @@ document.getElementById("acct-pass-eye").onclick = () => {
 document.getElementById("sync-now").onclick = async () => {
   acctMsg("Syncing…", "busy");
   const ok = await syncNow({ forceFull: true });
-  acctMsg(ok ? "Up to date ✅" : "Couldn't reach the server — your local progress is safe, try again in a moment.", ok ? "ok" : "no");
+  acctMsg(ok ? "Up to date ✅" : syncErrorText(), ok ? "ok" : "no");
   paintAcctStats();
 };
 document.getElementById("acct-logout").onclick = async () => {
