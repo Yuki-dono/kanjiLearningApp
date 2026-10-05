@@ -54,11 +54,57 @@ def test_api_base_defaults_to_same_origin(repo_root):
     assert re.search(r'API_BASE:\s*""', read(repo_root, "config.js"))
 
 
+def test_api_address_is_derived_from_the_hostname(repo_root):
+    """One committed config has to work on localhost and on the deployed site."""
+    source = read(repo_root, "app.js")
+    assert "LOCAL_HOSTS" in source
+    assert "location.hostname" in source
+    assert "CFG.API_URL" in source
+
+
 def test_config_js_documents_the_split_hosting_trap(repo_root):
     """The 404-on-GitHub-Pages case cost a debugging round trip once."""
     config = read(repo_root, "config.js")
-    assert "API_BASE" in config
+    assert "API_URL" in config
     assert "404" in config, "config.js should warn that the wrong origin 404s"
+
+
+# --------------------------------------------------------------------------
+# deploy config
+# --------------------------------------------------------------------------
+
+
+def test_deploy_files_never_carry_a_real_key(repo_root):
+    """The service_role key belongs in the host's dashboard, never the repo."""
+    for name in ("netlify.toml", "render.yaml"):
+        text = read(repo_root, name)
+        assert "sb_secret_" not in text, f"{name} contains a service_role key"
+        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in text, f"{name} contains a JWT"
+
+
+def test_render_service_defers_the_secrets_to_the_dashboard(repo_root):
+    """`sync: false` is what stops Render baking the key into the deploy."""
+    text = read(repo_root, "render.yaml")
+    for key in ("SUPABASE_SERVICE_ROLE_KEY", "CORS_ORIGINS"):
+        assert re.search(rf"key:\s*{key}\s*\n\s*sync:\s*false", text), (
+            f"{key} must be sync: false, not a committed value"
+        )
+
+
+def test_render_service_binds_everywhere_on_the_right_port(repo_root):
+    """A container that binds localhost is unreachable from outside."""
+    text = read(repo_root, "render.yaml")
+    assert "--host 0.0.0.0" in text
+    assert "$PORT" in text
+    assert "/api/health" in text
+
+
+def test_netlify_config_hardens_caching_and_hides_the_backend(repo_root):
+    text = read(repo_root, "netlify.toml")
+    assert "/data/*" in text, "3.8MB of JSON should be cached hard"
+    assert "max-age=0, must-revalidate" in text, "code must revalidate or deploys don't land"
+    # Guards against an accidentally committed server/.env being published.
+    assert "/server/*" in text
 
 
 # --------------------------------------------------------------------------

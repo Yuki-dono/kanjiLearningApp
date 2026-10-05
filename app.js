@@ -1625,8 +1625,15 @@ const CFG = window.KANJI_CONFIG || {};
 const SUPA_URL = CFG.SUPABASE_URL;
 const SUPA_ANON = CFG.SUPABASE_ANON_KEY;
 const SUPA_LIB = "https://esm.sh/@supabase/supabase-js@2.39.0";
-// Our API server. Empty string means same origin.
-const API_BASE = CFG.API_BASE || "";
+// Where the API lives.
+//
+// On localhost the API server serves this page too, so same-origin is correct and
+// CORS never applies. Anywhere else the page came from a static host that has no
+// /api/* at all, so it has to be told where the API is — otherwise sync 404s.
+// Deriving it from the hostname means one committed config.js works in both
+// places, instead of editing it every time you switch.
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+const API_BASE = CFG.API_BASE || (LOCAL_HOSTS.includes(location.hostname) ? "" : (CFG.API_URL || ""));
 
 const SYNC = {
   status: "local",      // local | syncing | ready | error

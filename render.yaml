@@ -1,0 +1,37 @@
+# Deploys the API to Render, which runs Python. GitHub Actions can apply this too:
+#   curl -X POST https://api.render.com/v1/svc/<service-id>/deploys -H "Authorization: Bearer $RENDER_API_KEY"
+#
+# The site itself is static and lives on Netlify / GitHub Pages. This file is only
+# the backend.
+services:
+  - type: web
+    name: kanjilearn-api
+    runtime: python
+    plan: free            # change if that plan name isn't available to you
+    rootDir: server
+    buildCommand: pip install -r requirements.txt
+    # 0.0.0.0 and $PORT are required: Render talks to the container over the
+    # network, it isn't a shell on the same box.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Render uses this to decide the service is up. Needs no token.
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: SUPABASE_URL
+        value: https://qkcquwbmmqgbvximphbz.supabase.co
+
+      # The admin key. Bypasses row-level security, so it must be set in the
+      # Render dashboard and never committed. `sync: false` leaves it unset on
+      # purpose — the deploy will start without it and sync calls will return 503
+      # until you fill it in.
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      - key: JWT_AUDIENCE
+        value: authenticated
+
+      # Which site origins may call the API. Must match where the site actually
+      # lives, scheme and host, no trailing slash. Comma-separate to allow more
+      # than one (e.g. a preview deploy as well as production).
+      - key: CORS_ORIGINS
+        sync: false
