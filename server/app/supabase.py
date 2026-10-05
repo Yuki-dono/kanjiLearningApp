@@ -70,6 +70,19 @@ def _map_error(resp: httpx.Response) -> SupabaseError:
 
     log.warning("postgrest %s %s", resp.status_code, f"{code} {detail}".strip())
 
+    text = f"{code} {detail}".lower()
+
+    # PGRST205 (table not in the schema cache) and 42P01 (relation does not
+    # exist) both mean the same actionable thing: the schema was never applied.
+    # Naming that is far more useful than a generic 404, and it discloses nothing
+    # the owner of the project doesn't already know.
+    if code == "42P01" or "pgrst205" in text or "schema cache" in text:
+        return SupabaseError(
+            404,
+            "The cloud tables aren't set up yet. Run supabase-schema.sql once in "
+            "Supabase → SQL Editor, then sync again.",
+        )
+
     if resp.status_code == 404:
         return SupabaseError(404, "Not found.")
     if resp.status_code in (401, 403):
@@ -96,6 +109,26 @@ class SupabaseREST:
             "apikey": self._s.supabase_service_role_key,
             "Authorization": f"Bearer {self._s.supabase_service_role_key}",
         }
+
+    @property
+    def project_ref(self) -> str:
+        """Which Supabase project this points at, e.g. `abcdefghijkl`.
+
+        Not a secret — it is already in the public project URL the browser uses.
+        Surfaced in diagnostics because the one thing that silently breaks
+        everything is the server being pointed at a different project than the
+        one the client signs in against.
+        """
+        host = self._s.supabase_url.split("//", 1)[-1].split("/", 1)[0]
+        return host.split(".", 1)[0]
+
+    async def table_exists(self, table: str) -> bool:
+        """True if the table is queryable. No rows are returned."""
+        try:
+            await self.request("GET", table, params={"select": "*", "limit": "1"})
+        except SupabaseError:
+            return False
+        return True
 
     def _url(self, table: str) -> str:
         if table not in ALLOWED_TABLES:

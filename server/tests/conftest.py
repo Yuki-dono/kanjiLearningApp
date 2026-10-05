@@ -122,6 +122,8 @@ class FakePostgREST:
         self.calls: list[httpx.Request] = []
         self.tables: dict[str, dict[tuple, dict[str, Any]]] = defaultdict(dict)
         self.identity = 0
+        # Tables the "database" claims not to have, to reproduce PGRST205.
+        self.missing_tables: set[str] = set()
 
     # -- helpers used by tests -------------------------------------------
     def rows(self, table: str) -> list[dict[str, Any]]:
@@ -145,6 +147,14 @@ class FakePostgREST:
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request)
         table = request.url.path.rsplit("/", 1)[-1]
+        if table in self.missing_tables:
+            return httpx.Response(
+                404,
+                json={
+                    "code": "PGRST205",
+                    "message": f"Could not find the table 'public.{table}' in the schema cache",
+                },
+            )
         method = request.method
         owner_filter = {
             key: value[3:]

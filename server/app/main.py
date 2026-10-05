@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .auth import warm_jwks
 from .config import get_settings
-from .routers import content, me, sync
+from .routers import content, me, setup, sync
 from .supabase import SupabaseError, SupabaseREST
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -83,10 +83,20 @@ def create_app() -> FastAPI:
     app.include_router(sync.router)
     app.include_router(me.router)
     app.include_router(content.router)
+    app.include_router(setup.router)
 
     @app.get("/api/health", tags=["meta"])
-    async def health() -> dict[str, object]:
-        return {"ok": True}
+    async def health(request: Request) -> dict[str, object]:
+        # The project ref is not a secret — it's in the public URL the browser
+        # already uses — and it's the quickest way to catch the one failure that
+        # looks like every other failure: the server pointed at a different
+        # Supabase project than the one the client signs in against.
+        ref = ""
+        try:
+            ref = request.app.state.rest.project_ref
+        except AttributeError:  # lifespan hasn't run
+            pass
+        return {"ok": True, "supabase_project": ref}
 
     # After the routers, so /api/* always wins over these.
     for _name, _media_type in SITE_FILES.items():

@@ -2160,10 +2160,14 @@ function syncErrorText() {
     return "The server can't reach the sign-in service. Try again in a moment.";
   if (e.includes("misconfigured"))
     return "The server's database credentials are wrong — it needs fixing, not retrying.";
+  // The schema was never applied. Checked before the generic "not found" case so
+  // a missing-table 404 lands on the actual fix rather than a shrug.
+  if (e.includes("cloud tables") || e.includes("supabase-schema") || e.includes("schema") ||
+      e.includes("does not exist") || e.includes("pgrst") || e.includes("42p01"))
+    return "The cloud tables aren't set up yet. Run supabase-schema.sql once in Supabase → SQL Editor, then hit Sync now. " +
+      `Or open ${API_BASE}/api/diagnose to see which tables are missing.`;
   if (e.includes("not found"))
-    return "The database rejected that row. Check the tables in supabase-schema.sql still exist.";
-  if (e.includes("schema") || e.includes("does not exist") || e.includes("pgrst") || e.includes("42p01"))
-    return "The cloud tables are missing. Run supabase-schema.sql once in Supabase → SQL Editor, then sync again.";
+    return "The database rejected that request. Hit Sync now again, and tell us if it keeps failing.";
   if (e.includes("unprocessable") || e.includes("422"))
     return "This device sent something the server wouldn't accept. Try a full sync, and tell us if it keeps failing.";
   if (e.includes("429") || e.includes("too much data") || e.includes("smaller sync"))
