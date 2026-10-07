@@ -1236,7 +1236,12 @@ input[type="checkbox"] { accent-color: var(--brand); width: 15px; height: 15px; 
 
 /* --- app shell: mobile drawer --- */
 @media (max-width: 900px) {
-  :root { --topbar-h: 56px; }
+  /* The inset is 0 on desktop-sized viewports and on browsers without a
+     notch, hence max() with a small floor: the bar never sits flush against
+     the top edge on a phone. --topbar-h carries the same amount so sticky
+     offsets (.rail) still line up with the real height of the bar. */
+  :root { --topbar-h: calc(56px + max(env(safe-area-inset-top), 8px)); }
+  .topbar { padding-top: max(env(safe-area-inset-top), 8px); }
   .menu-btn { display: grid; }
   .sidebar {
     position: fixed; z-index: 70; inset: 0 auto 0 0;
@@ -1263,6 +1268,14 @@ input[type="checkbox"] { accent-color: var(--brand); width: 15px; height: 15px; 
   @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
   .search { max-width: none; }
   .search kbd { display: none; }
+  /* Dark mode lives in the drawer on mobile, so the topbar copy is a
+     duplicate. Dropping it frees the width the chips need to stay on the
+     same row as the search field instead of wrapping under it. */
+  #theme-btn { display: none; }
+  /* Keep menu + search + chips on one line: wrapping pushed the chips to a
+     second row, which read as unaligned with the search bar. */
+  .topbar { flex-wrap: nowrap; column-gap: 8px; }
+  .search { flex: 1 1 0; }
   .page { padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 20px)); }
   h1 { font-size: clamp(19px, 4.6vw, 21px); }
   .modal { padding: 12px; align-items: flex-end; }
@@ -1272,6 +1285,13 @@ input[type="checkbox"] { accent-color: var(--brand); width: 15px; height: 15px; 
   .chip { font-size: 10px; padding: 3px 8px; }
   .top-right { gap: 6px; }
   .icon-btn, .avatar { width: 32px; height: 32px; }
+}
+@media (max-width: 400px) {
+  /* With the topbar pinned to one row, the chips are the only thing that can
+     give ground on the narrowest phones. Let them truncate instead of forcing
+     the bar to overflow horizontally. */
+  .top-right { min-width: 0; flex-shrink: 1; }
+  .chip { min-width: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
