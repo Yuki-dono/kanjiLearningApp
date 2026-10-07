@@ -104,14 +104,12 @@ async def test_build_marker_is_present_and_logged(repo_root):
     assert "CFG.BUILD" in app, "app.js should report the build marker"
 
 
-async def test_netlify_config_disables_the_build_command(repo_root):
-    """netlify.toml only overrides the UI keys it actually contains.
+async def test_render_serves_the_site_files(repo_root):
+    """One origin means the client needs no CORS and no separate static host.
 
-    Without an explicit empty command, a build command Netlify guessed in its UI
-    would still run -- and with no package.json it would fail the deploy.
+    These are the files the server hands out directly; if one is dropped from
+    the list the app loads but that asset 404s in production only.
     """
-    import tomllib
-
-    config = tomllib.loads((repo_root / "netlify.toml").read_text(encoding="utf-8"))
-    assert config["build"]["command"] == "", "build command must be explicitly empty"
-    assert config["build"]["publish"] == ".", "publish directory must be the repo root"
+    source = (repo_root / "server" / "app" / "main.py").read_text(encoding="utf-8")
+    for name in ("index.html", "styles.css", "app.js", "config.js", "api.js"):
+        assert f'"{name}"' in source, f"{name} is no longer served by the API"

@@ -4,67 +4,64 @@ For N4–N3 level study. Library + scoped tests + compound vocab.
 
 ## Deploy
 
-Account and sync need **two** deployments, and they cannot be the same one:
+**One service on Render does everything.** It runs the API and serves the static
+site from the same origin, so there is no second host to configure and the
+browser never needs CORS.
 
-| Piece | Where | Why |
-|---|---|---|
-| The site (HTML/JS/CSS/JSON) | Netlify, GitHub Pages, anything static | No server code |
-| **The API** (`server/`) | **Render, Railway, Fly, or a VPS** | It's Python |
+`server/app/main.py` lists the site files explicitly and returns them alongside
+the `/api/*` routes, and mounts `data/` statically. Nothing else is published,
+so backend source and `server/.env` are never reachable.
 
-**Netlify cannot run the API.** Netlify Functions are Node/TypeScript only. This
-is the piece people get stuck on: deploying the site to Netlify gets you a
-working app with no sync, because there is no `/api/*` on that origin.
-
-### 1. Deploy the API
+### 1. Create the service
 
 `render.yaml` is in the repo root, so Render can pick it up.
 
 1. [render.com](https://render.com) → **New → Blueprint** → connect this repo
 2. Render lists the service from `render.yaml`; confirm it
-3. In the service's **Environment**, set the two it deliberately left unset:
+3. In the service's **Environment**, set the one it deliberately left unset:
    - `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Project Settings → API Keys
-   - `CORS_ORIGINS` — where the site will live, e.g. `https://yoursite.netlify.app`
-     (scheme + host, no trailing slash; comma-separate for preview deploys)
 4. Note the URL it gives you, e.g. `https://kanjilearn-api.onrender.com`
+
+Leave `CORS_ORIGINS` empty. That is what same-origin means, and empty is the
+default that the server checks.
 
 Check it: `curl https://kanjilearn-api.onrender.com/api/health` → `{"ok":true}`
 
 Free-tier services **sleep when idle**, so the first request after a quiet spell
-takes ~30s while it wakes up. The app shows "Syncing…" and waits it out. If it
-looks frozen, wait and hit Sync again.
+takes ~30s while it wakes up. That delay is the service starting, not a failed
+deploy. The app shows "Syncing…" and waits it out.
 
-### 2. Point the site at it
+### 2. Confirming a deploy landed
 
-Put the URL from step 1 in `config.js` and push:
+A push to `main` does not change what is being served until Render rebuilds.
+Two ways to check without guessing:
 
-```js
-API_URL: "https://kanjilearn-api.onrender.com",
-```
+- The console logs `BUILD` on boot (`config.js`). Compare it against the value
+  in `config.js`; a stale number means the old build is still live.
+- `curl <your-url>/api/health` returns the Supabase project ref, which confirms
+  which project the running code points at.
 
-Then push. That's it — the value is derived from the hostname, so local
-development on `localhost:8000` keeps using same-origin and needs no CORS.
+If the build number looks current but the layout is not, hard-reload. The site
+files are served with `ETag`/`Last-Modified`, so the browser revalidates on its
+own; a hard reload bypasses a cache that was warm before the deploy.
 
-### 3. Deploy the site
+### When you'd need CORS after all
 
-Netlify: connect the repo, publish directory `.`, no build command.
-`netlify.toml` already sets the caching (hard for `data/`, no-cache for code) and
-404s `/server/*` so backend source isn't published.
-
-### 4. Set CORS_ORIGINS on the API
-
-This is the step people miss. It must match your site's **exact** origin —
-`https://yoursite.netlify.app`, not the bare hostname, not with a trailing slash.
-Wrong or missing and the browser silently drops every response, which looks
-identical to "sync is broken".
+Only if the site and the API were split across origins again. Then
+`CORS_ORIGINS` must match the site's **exact** origin — scheme and host, no
+trailing slash. Wrong or missing and the browser silently drops every response,
+which looks identical to "sync is broken". There is no reason to split them
+today, so this is a note for later, not a step to perform.
 
 ### Verifying
 
 | Check | Expected |
 |---|---|
-| `curl <api>/api/health` | `{"ok":true}` |
+| `curl <url>/api/health` | `{"ok":true}` |
 | Site loads, no console errors | dictionaries render |
+| Console `BUILD` | matches `config.js` |
 | Account chip | `● Synced` after signing in |
-| If the chip says `⚠ No server` | `API_URL` wrong, or CORS rejecting it |
+| If the chip says `⚠ No server` | the API is unreachable or sleeping |
 
 ## Run locally
 
@@ -89,24 +86,23 @@ Must use http:// (not file://) because the app fetches the kanji and vocabulary 
 
 ### Sync fails with "No sync server at this address" / a 404
 
-You opened the site somewhere the API doesn't live. Sync needs the FastAPI server,
-so open **http://localhost:8000** — not a static host.
+Sync needs the FastAPI server, because it is the thing that talks to Supabase.
+Open **http://localhost:8000**, not a plain static server.
 
-GitHub Pages, Netlify, `file://` and `python -m http.server` all serve the files
-but have no `/api/*`, so every sync 404s. Everything else still works, which is
-what makes it confusing: the app loads (content falls back to `data/`), sign-in
-works (Supabase is external), and only sync breaks.
+`file://` and `python -m http.server 8000` both serve the files but have no
+`/api/*`, so every sync 404s. Everything else still works, which is what makes
+it confusing: the app loads (content falls back to `data/`), sign-in works
+(Supabase is external), and only sync breaks.
 
-Two ways out:
-
-1. **Use the API server** — `cd server && uvicorn app.main:app --port 8000`, then open `http://localhost:8000`. One origin, no CORS.
-2. **Host them separately** — deploy the API, then set `API_BASE` in `config.js` to its URL and `CORS_ORIGINS` in `server/.env` to the origin serving the page. The account panel will say `⚠ No server` if the two don't line up.
+Fix: `cd server && uvicorn app.main:app --port 8000`, then open
+`http://localhost:8000`. One origin, no CORS — the same arrangement Render uses.
 
 The sidebar chip and account panel both report which server is reachable, so this
 is visible without attempting a sync.
 
-Working offline or just browsing without sync? `python -m http.server 8000` still
-works — sign-in and cloud sync are disabled, everything else behaves the same.
+If it fails on the deployed URL rather than locally, the service is probably
+asleep. A free-tier Render service takes ~30s to wake; wait and retry rather
+than re-deploying.
 
 ## Tests
 

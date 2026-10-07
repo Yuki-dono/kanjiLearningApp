@@ -76,7 +76,7 @@ def test_config_js_documents_the_split_hosting_trap(repo_root):
 
 def test_deploy_files_never_carry_a_real_key(repo_root):
     """The service_role key belongs in the host's dashboard, never the repo."""
-    for name in ("netlify.toml", "render.yaml"):
+    for name in ("render.yaml",):
         text = read(repo_root, name)
         assert "sb_secret_" not in text, f"{name} contains a service_role key"
         assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in text, f"{name} contains a JWT"
@@ -99,12 +99,14 @@ def test_render_service_binds_everywhere_on_the_right_port(repo_root):
     assert "/api/health" in text
 
 
-def test_netlify_config_hardens_caching_and_hides_the_backend(repo_root):
-    text = read(repo_root, "netlify.toml")
-    assert "/data/*" in text, "3.8MB of JSON should be cached hard"
-    assert "max-age=0, must-revalidate" in text, "code must revalidate or deploys don't land"
-    # Guards against an accidentally committed server/.env being published.
-    assert "/server/*" in text
+def test_static_hosts_are_gone(repo_root):
+    """One deployment on Render serves both the site and the API.
+
+    The repo used to carry a netlify.toml for a separate static host. It was
+    deleted, and a stale copy would only reassert a split deployment that no
+    longer exists.
+    """
+    assert not (repo_root / "netlify.toml").exists(), "netlify.toml is dead: Render serves the site"
 
 
 # --------------------------------------------------------------------------

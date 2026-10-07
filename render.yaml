@@ -1,8 +1,8 @@
-# Deploys the API to Render, which runs Python. GitHub Actions can apply this too:
+# Deploys the app to Render. GitHub Actions can apply this too:
 #   curl -X POST https://api.render.com/v1/svc/<service-id>/deploys -H "Authorization: Bearer $RENDER_API_KEY"
 #
-# The site itself is static and lives on Netlify / GitHub Pages. This file is only
-# the backend.
+# This is the only deployment. The service serves both the static site and the
+# API from one origin, so the browser needs no CORS and no second host.
 services:
   - type: web
     name: kanjilearn-api
